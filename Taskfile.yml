@@ -5,22 +5,21 @@ version: "3"
 
 tasks:
   venv:
-    generates:
-      - venv/**
+    status:
+      - "test -d venv"
     cmds:
       - python -m venv venv
+    silent: false
   install:
     sources:
       - requirements.txt
     deps:
-      - install
+      - venv
     cmds:
-      - venv/Scripts/pip install -r requirements.txt
+      - venv/Scripts/python -m pip install -r requirements.txt
     silent: false
   default:
-    watch: true
-    sources:
-      - src/**
-      - main.py
+    deps:
+      - install
     cmds:
       - venv/Scripts/python src/main.py
