@@ -19,7 +19,7 @@ class Node:
                     frame.destination} to {frame.source}")
         return frame
 
-    def send_MAC_frame(self, dst: str, data: str):
+    def send_MAC_frame(self, dst: MACaddr, data: str):
         logger.info(f"sending {data} from {self.MAC} to {dst}")
         MAC_frame(self.MAC, dst, data)
         pass
