@@ -1,6 +1,12 @@
 # yaml-language-server: $schema=https://json-schema.org/draft-07/schema
 
 title: Networking config schema
+
+$defs:
+  nodepattern:
+    type: string
+    pattern: ^N\d$
+
 properties:
   nodes:
     type: object
@@ -9,9 +15,7 @@ properties:
         type: object
         properties:
           MAC:
-            type: string
-            minLength: 2
-            maxLength: 2
+            $ref: "#/$defs/nodepattern"
           IP:
             type: number
             minimum: 0x0
@@ -32,7 +36,6 @@ properties:
         nodes:
           type: array
           items:
-            type: string
-            pattern: ^N\d$
+            $ref: "#/$defs/nodepattern"
 
 additionalProperties: false
