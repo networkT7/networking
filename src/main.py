@@ -5,16 +5,17 @@ from networking.node import Node
 from networking.wire import Wire
 
 with open("config.yaml") as f:
-    data = load(f.read(), Loader)
+    config = load(f.read(), Loader)
 
 if len(argv) < 3:
     print(f"usage: {executable} {argv[0]} node|wire|router NAME")
     exit(1)
 
 if argv[1] == "node":
-    Node(data["nodes"][argv[2]]).send_MAC_frame(
-        "N2", input("Enter your message: "))
-
+    n = Node(config["nodes"][argv[2]])
+    data = input("Enter your message: ")
+    idx = data.find(" ")
+    n.send_MAC_frame(data[:idx], data[idx+1:])
 
 if argv[1] == "wire":
-    Wire(data["wires"][int(argv[2])], data["nodes"]).forward()
+    Wire(config["wires"][int(argv[2])], config["nodes"]).forward()
