@@ -7,5 +7,4 @@ nodes:
     port: 8000
 
 wires:
-  - nodes:
-      - N1
+  - - N1

@@ -1,4 +1,11 @@
-from typing import TypeIs
+from typing import TypeIs, TypedDict
+
+
+class NodeConfig(TypedDict):
+    MAC: str
+    IP: int
+    port: int
+
 
 MACaddr = str
 

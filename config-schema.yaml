@@ -31,11 +31,8 @@ properties:
   wires:
     type: array
     items:
-      type: object
-      properties:
-        nodes:
-          type: array
-          items:
-            $ref: "#/$defs/nodepattern"
+      type: array
+      items:
+        $ref: "#/$defs/nodepattern"
 
 additionalProperties: false
