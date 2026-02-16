@@ -18,7 +18,6 @@ class Wire:
             sock.settimeout(1)
 
         while True:
-            print("looping")
             for sock in self.__map.values():
                 try:
                     msg = sock.recv(1000)
