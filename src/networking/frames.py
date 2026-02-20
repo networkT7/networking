@@ -28,8 +28,7 @@ class MAC_frame:
         data = arr[5:]
         data_len = ord(arr[4])
         actual_len = len(data)
-        assert data_len == actual_len, f"data size {
-            data_len} doesn't match with actual size {actual_len}"
+        assert data_len == actual_len, f"data size {data_len} doesn't match with actual size {actual_len}"
 
         return MAC_frame(arr[:2], arr[2:4], data)
 
@@ -71,5 +70,4 @@ class MAC_frame:
         return self.__length
 
     def __bytes__(self):
-        return f"{self.__src}{self.__dst}{
-            chr(self.__length)}{self.__data}".encode()
+        return f"{self.__src}{self.__dst}{chr(self.__length)}{self.__data}".encode()
