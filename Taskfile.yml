@@ -13,10 +13,12 @@ tasks:
   install:
     sources:
       - requirements.txt
+    status:
+      - '[ "$(venv/Scripts/pip freeze)" -eq "$(cat requirements.txt)" ]'
     deps:
       - venv
     cmds:
-      - venv/Scripts/python -m pip install -r requirements.txt
+      - venv/Scripts/pip install -r requirements.txt
     silent: false
   default:
     deps:
