@@ -2,6 +2,7 @@ from sys import argv, executable
 from yaml import load, Loader
 
 from networking.node import Node
+from networking.protocol import NodeConfig
 from networking.wire import Wire
 
 with open("config.yaml") as f:
@@ -12,7 +13,8 @@ if len(argv) < 3:
     exit(1)
 
 if argv[1] == "node":
-    n = Node(config["nodes"][argv[2]])
+    c: NodeConfig = config["nodes"][argv[2]]
+    n = Node(c, int(config["wires"][c["wire"]]))
 
     while True:
         data = input("Enter your message: ")
@@ -20,4 +22,4 @@ if argv[1] == "node":
         n.send_MAC_frame(data[:idx], data[idx+1:])
 
 if argv[1] == "wire":
-    Wire(config["wires"][int(argv[2])], config["nodes"]).forward()
+    Wire(int(config["wires"][argv[2]])).accept()

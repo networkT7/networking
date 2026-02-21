@@ -4,9 +4,10 @@ from typing import TypeIs, TypedDict
 class NodeConfig(TypedDict):
     MAC: str
     IP: int
-    port: int
+    wire: str
 
 
+HOSTNAME = "127.0.0.1"
 MACaddr = str
 
 
