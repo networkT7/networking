@@ -4,12 +4,15 @@ nodes:
   N1:
     MAC: N1
     IP: 0x11
-    port: 8000
+    wire: W0
   N2:
     MAC: N2
     IP: 0x22
-    port: 8001
+    wire: W0
+  N3:
+    MAC: N3
+    IP: 0x23
+    wire: W0
 
 wires:
-  - - N1
-    - N2
+  W0: 8000

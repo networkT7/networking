@@ -6,6 +6,9 @@ $defs:
   nodepattern:
     type: string
     pattern: ^N\d$
+  wirepattern:
+    type: string
+    pattern: ^W\d$
 
 properties:
   nodes:
@@ -20,19 +23,18 @@ properties:
             type: number
             minimum: 0x0
             exclusiveMaximum: 0x100
-          port:
-            type: number
+          wire:
+            $ref: "#/$defs/wirepattern"
         additionalProperties: false
         required:
           - MAC
           - IP
-          - port
+          - wire
     additionalProperties: false
   wires:
-    type: array
-    items:
-      type: array
-      items:
-        $ref: "#/$defs/nodepattern"
+    type: object
+    patternProperties:
+      ^W\d$:
+        type: number
 
 additionalProperties: false

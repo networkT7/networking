@@ -6,7 +6,7 @@ from typing import override
 
 from networking.frames import MAC_frame
 from networking.log_format import create_logger
-from networking.protocol import MACaddr, NodeConfig
+from networking.protocol import MACaddr, NodeConfig, HOSTNAME
 
 
 @dataclass
@@ -33,14 +33,13 @@ class Node:
         self.__socket.send(bytes(MAC_frame(self.MAC, dst, data)))
 
     @override
-    def __init__(self, node_config: NodeConfig):
+    def __init__(self, node_config: NodeConfig, wire_port: int):
         self.MAC = node_config["MAC"]
         self.IP = node_config["IP"]
         self.__logger = create_logger(self.MAC)
-        (sock, _) = socket.create_server(
-            ("127.0.0.1", node_config["port"])).accept()
+        self.__socket = socket.create_connection((HOSTNAME, wire_port))
         self.__logger.info("connected to wire")
-        self.__socket = sock
+
         Thread(target=self.rcv_MAC_frame).start()
 
     def __del__(self):
