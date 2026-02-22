@@ -10,15 +10,13 @@ logger = create_logger(__name__)
 
 class Wire:
     __targets = SimpleQueue()
-    __size = 0
 
     def _broadcast(self, msg: bytes):
-        logger.info(f"sending messages to {self.__size} targets")
-        for _ in range(self.__size):
-            print("Loop")
-            sock = self.__targets.get_nowait()
+        logger.info(f"sending messages to {self.__targets.qsize()} targets")
+        for _ in range(self.__targets.qsize()):
+            sock = self.__targets.get()
             sock.send(msg)
-            self.__targets.put_nowait(sock)
+            self.__targets.put(sock)
 
     def forward(self):
         while True:
@@ -30,16 +28,15 @@ class Wire:
             except TimeoutError:
                 pass
             finally:
-                self.__targets.put_nowait(sock)
+                self.__targets.put(sock)
 
     def accept(self):
         while True:
             # logger.info("waiting for connection")
             try:
                 conn, _ = self.__server.accept()
-                self.__size += 1
                 conn.settimeout(1)
-                self.__targets.put_nowait(conn)
+                self.__targets.put(conn)
             except TimeoutError:
                 pass
 
