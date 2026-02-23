@@ -2,6 +2,9 @@ from enum import IntEnum
 from typing import TypeIs, TypedDict
 
 HOSTNAME = "127.0.0.1"
+BROADCAST_MAC = "\xff\xff"
+BROADCAST_IP = 0xFF
+BYTE_ENCODING_TYPE = "iso-8859-1"
 MACaddr = str
 IPaddr = int
 

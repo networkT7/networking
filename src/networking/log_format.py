@@ -3,10 +3,10 @@
 # Retrieved 2026-02-10, License - CC BY-SA 4.0
 
 import logging
+from typing import override
 
 
 class CustomFormatter(logging.Formatter):
-
     white = "\x1b[97;20m"
     grey = "\x1b[38;20m"
     green = "\x1b[32;20m"
@@ -25,13 +25,14 @@ class CustomFormatter(logging.Formatter):
         logging.CRITICAL: fmt.format(bold_red, reset),
     }
 
-    def format(self, record):
+    @override
+    def format(self, record: logging.LogRecord):
         log_fmt = self.FORMATS.get(record.levelno)
         formatter = logging.Formatter(log_fmt, datefmt="%H:%M:%S")
         return formatter.format(record)
 
 
-def create_logger(name: str, level=logging.DEBUG) -> logging.Logger:
+def create_logger(name: str, level: int = logging.DEBUG) -> logging.Logger:
     handler = logging.StreamHandler()
     handler.setLevel(level)
     handler.setFormatter(CustomFormatter())

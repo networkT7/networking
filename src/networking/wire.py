@@ -9,7 +9,7 @@ logger = create_logger(__name__)
 
 
 class Wire:
-    __targets = SimpleQueue()
+    __targets: SimpleQueue[socket.SocketType] = SimpleQueue()
 
     def _broadcast(self, msg: bytes):
         logger.info(f"sending {msg} to {self.__targets.qsize()} targets")
