@@ -14,12 +14,7 @@ if len(argv) < 3:
 
 if argv[1] == "node":
     c: NodeConfig = config["nodes"][argv[2]]
-    n = Node(c, int(config["wires"][c["wire"]]))
-
-    while True:
-        data = input("Enter your message: ")
-        idx = data.find(" ")
-        n.send_MAC_frame(data[:idx], data[idx+1:])
+    n = Node(c, int(config["wires"][c["wire"]])).input()
 
 if argv[1] == "wire":
     Wire(int(config["wires"][argv[2]])).accept()

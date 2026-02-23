@@ -1,17 +1,19 @@
+from enum import IntEnum
 from typing import TypeIs, TypedDict
 
+HOSTNAME = "127.0.0.1"
 MACaddr = str
 IPaddr = int
+
+
+class IPProtocol(IntEnum):
+    PING = 1
 
 
 class NodeConfig(TypedDict):
     MAC: MACaddr
     IP: IPaddr
     wire: str
-
-
-HOSTNAME = "127.0.0.1"
-MACaddr = str
 
 
 def _valid_MAC(MAC: str) -> TypeIs[MACaddr]:

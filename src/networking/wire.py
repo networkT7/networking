@@ -12,7 +12,7 @@ class Wire:
     __targets = SimpleQueue()
 
     def _broadcast(self, msg: bytes):
-        logger.info(f"sending messages to {self.__targets.qsize()} targets")
+        logger.info(f"sending {msg} to {self.__targets.qsize()} targets")
         for _ in range(self.__targets.qsize()):
             sock = self.__targets.get()
             sock.send(msg)
@@ -23,7 +23,6 @@ class Wire:
             sock = self.__targets.get()
             try:
                 msg = sock.recv(1000)
-                logger.info(f"sending message {msg}")
                 self._broadcast(msg)
             except TimeoutError:
                 pass
@@ -32,7 +31,6 @@ class Wire:
 
     def accept(self):
         while True:
-            # logger.info("waiting for connection")
             try:
                 conn, _ = self.__server.accept()
                 conn.settimeout(1)
@@ -43,7 +41,6 @@ class Wire:
     def __init__(self, port: int):
         Thread(target=self.forward).start()
         self.__server = socket.create_server((HOSTNAME, port))
-        self.__server.settimeout(1)
 
     def __del__(self):
         logger.info("closing sockets")
