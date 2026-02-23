@@ -24,8 +24,7 @@ class Node:
                 continue
 
             match frame:
-                case MACFrame(src, dst, _, msg):
-                    bites = msg.encode()
+                case MACFrame(src, dst, _, bites):
                     self.__logger.info(f"rcving {bites} from {src} to {dst}")
                     self.rcv_IP_frame(bites)
 
@@ -43,26 +42,26 @@ class Node:
                                    dst:02x} with protocol {IPProtocol(protocol).name}")
                 return ip_frame
 
-    def send_MAC_frame(self, dst: MACaddr, data: str):
-        self.__logger.info(f"sending {data.encode()} from {self.MAC} to {dst}")
+    def send_MAC_frame(self, dst: MACaddr, data: bytes):
+        self.__logger.info(f"sending {data} from {self.MAC} to {dst}")
         self.__socket.send(bytes(MACFrame(self.MAC, dst, data)))
 
-    def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: str):
+    def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
         self.__logger.info(f"sending {data} from 0x{
                            self.IP:02x} to 0x{dst:02x}")
         # TODO: ARP mapping to send IP frame to correct MAC
         self.send_MAC_frame("N2", bytes(
-            IPFrame(self.IP, dst, protocol, data)).decode())
+            IPFrame(self.IP, dst, protocol, data)))
 
     def input(self):
         while True:
             data = input("Format: MAC {dst} msg OR IP {dst} [PING|] msg: ")
             match data.split():
                 case ["MAC", dst, *data]:
-                    self.send_MAC_frame(dst, " ".join(data))
+                    self.send_MAC_frame(dst, " ".join(data).encode())
                 case ["IP", dst, protocol, *data]:
-                    self.send_IP_frame(int(dst, base=16),
-                                       IPProtocol[protocol], " ".join(data))
+                    self.send_IP_frame(
+                        int(dst, base=16), IPProtocol[protocol], " ".join(data).encode())
 
     @override
     def __init__(self, node_config: NodeConfig, wire_port: int):

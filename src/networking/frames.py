@@ -20,27 +20,26 @@ class MACFrame:
     __src: MACaddr
     __dst: MACaddr
     __length: int
-    __data: str
+    __data: bytes
 
-    def from_bytes(byte_arr: bytes) -> MACFrame:
+    def from_bytes(arr: bytes) -> MACFrame:
         """
         Deserialises a MAC frame from bytes
         """
-        length = len(byte_arr)
+        length = len(arr)
         if length < 5 or length > 261:
             raise DeserializationException("data is not a valid MAC frame")
 
-        arr = byte_arr.decode()
         data = arr[5:]
-        data_len = ord(arr[4])
+        data_len = arr[4]
         actual_len = len(data)
         if data_len != actual_len:
             raise DeserializationException(f"data size {data_len} doesn't match with actual size {actual_len}")  # noqa
 
-        return MACFrame(arr[:2], arr[2:4], data)
+        return MACFrame(arr[:2].decode(), arr[2:4].decode(), data)
 
     @property
-    def data(self) -> str:
+    def data(self) -> bytes:
         """
         Returns the encapsulated data
         """
@@ -77,7 +76,7 @@ class MACFrame:
         return self.__length
 
     def __bytes__(self):
-        return f"{self.__src}{self.__dst}{chr(self.__length)}{self.__data}".encode()  # noqa
+        return f"{self.__src}{self.__dst}{chr(self.__length)}".encode() + self.__data  # noqa
 
 
 @dataclass
@@ -91,32 +90,31 @@ class IPFrame:
     __dst: IPaddr
     __protocol: IPProtocol
     __length: int
-    __data: str
+    __data: bytes
 
-    def from_bytes(byte_arr: bytes) -> IPFrame:
+    def from_bytes(arr: bytes) -> IPFrame:
         """
         Deserialises an IP frame from bytes
         """
-        length = len(byte_arr)
+        length = len(arr)
         if length < 4 or length > 260:
             raise DeserializationException("data is not a valid IP frame")
 
-        arr = byte_arr.decode()
         try:
-            protocol = IPProtocol(ord(arr[2]))
+            protocol = IPProtocol(arr[2])
         except ValueError:
             raise DeserializationException("not a valid IP protocol")
 
         data = arr[4:]
-        data_len = ord(arr[3])
+        data_len = arr[3]
         actual_len = len(data)
         if data_len != actual_len:
             raise DeserializationException(f"data size {data_len} doesn't match with actual size {actual_len}")  # noqa
 
-        return IPFrame(ord(arr[0]), ord(arr[1]), protocol, data)
+        return IPFrame(arr[0], arr[1], protocol, data)
 
     @property
-    def data(self) -> str:
+    def data(self) -> bytes:
         """
         Returns the encapsulated data
         """
@@ -162,4 +160,4 @@ class IPFrame:
         return self.__length
 
     def __bytes__(self):
-        return f"{chr(self.__src)}{chr(self.__dst)}{chr(self.__protocol.value)}{chr(self.__length)}{self.__data}".encode()  # noqa
+        return f"{chr(self.__src)}{chr(self.__dst)}{chr(self.__protocol.value)}{chr(self.__length)}".encode() + self.__data  # noqa
