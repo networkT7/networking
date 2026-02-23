@@ -24,4 +24,4 @@ tasks:
     deps:
       - install
     cmds:
-      - venv/Scripts/python src/main.py
+      - venv/Scripts/python src/main.py {{.CLI_ARGS}}
