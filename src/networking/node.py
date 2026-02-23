@@ -35,6 +35,8 @@ class Node:
         except DeserializationException as e:
             self.__logger.error(str(e))
             return None
+        if ip_frame.destination != self.IP:
+            return None
         match ip_frame:
             case IPFrame(src, dst, protocol, _, data):
                 self.__logger.info(f"rcving {data} from 0x{src:02x} to 0x{

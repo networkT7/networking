@@ -3,11 +3,11 @@
 nodes:
   N1:
     MAC: N1
-    IP: 0x11
+    IP: 0x12
     wire: W0
   N2:
     MAC: N2
-    IP: 0x22
+    IP: 0x13
     wire: W0
   N3:
     MAC: N3
