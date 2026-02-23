@@ -5,10 +5,8 @@ class TSDict[K, V]:
     __queue: SimpleQueue[tuple[K, V]] = SimpleQueue()
 
     def __contains__(self, key: K) -> bool:
-        for k, _ in self:
-            if k == key:
-                return True
-        return False
+        v = self.get(key)
+        return True if v else False
 
     def __iter__(self):
         for _ in range(self.__queue.qsize()):
@@ -22,15 +20,12 @@ class TSDict[K, V]:
             return v
         raise KeyError
 
-    def __setitem__(self, key: K, value: V) -> V | None:
+    def __setitem__(self, key: K, value: V):
         for _ in range(self.__queue.qsize()):
-            k, v = self.__queue.get()
+            k, _ = self.__queue.get()
             if k == key:
                 self.__queue.put((key, value))
-                return v
-            self.__queue.put((k, v))
         self.__queue.put((key, value))
-        return None
 
     def get(self, key: K) -> V | None:
         for k, v in self:
@@ -41,6 +36,6 @@ class TSDict[K, V]:
     def block_until(self, key: K) -> V:
         while True:
             k, v = self.__queue.get()
+            self.__queue.put((k, v))
             if k == key:
                 return v
-            self.__queue.put((k, v))
