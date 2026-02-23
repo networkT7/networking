@@ -41,6 +41,7 @@ class Wire:
     def __init__(self, port: int):
         Thread(target=self.forward).start()
         self.__server = socket.create_server((HOSTNAME, port))
+        self.__server.settimeout(1)
 
     def __del__(self):
         logger.info("closing sockets")
