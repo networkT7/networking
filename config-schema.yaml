@@ -11,6 +11,27 @@ $defs:
     pattern: ^W\d$
 
 properties:
+  config:
+    type: object
+    properties:
+      HOSTNAME:
+        type: string
+      LOGGING_LEVEL:
+        enum:
+          - DEBUG
+          - INFO
+          - WARNING
+          - ERROR
+          - CRITICAL
+      RECEIVE_SIZE:
+        type: integer
+      SOCKET_TIMEOUT:
+        type: number
+    required:
+      - HOSTNAME
+      - LOGGING_LEVEL
+      - RECEIVE_SIZE
+      - SOCKET_TIMEOUT
   nodes:
     type: object
     patternProperties:
@@ -36,5 +57,10 @@ properties:
     patternProperties:
       ^W\d$:
         type: number
+
+required:
+  - config
+  - nodes
+  - wires
 
 additionalProperties: false

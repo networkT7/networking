@@ -2,8 +2,8 @@ from queue import SimpleQueue
 import socket
 from threading import Thread
 
+from networking.config import HOSTNAME, RECEIVE_SIZE, SOCKET_TIMEOUT
 from networking.log_format import create_logger
-from networking.protocol import HOSTNAME
 
 logger = create_logger(__name__)
 
@@ -22,7 +22,7 @@ class Wire:
         while True:
             sock = self.__targets.get()
             try:
-                msg = sock.recv(1000)
+                msg = sock.recv(RECEIVE_SIZE)
                 self._broadcast(msg)
             except TimeoutError:
                 pass
@@ -33,7 +33,7 @@ class Wire:
         while True:
             try:
                 conn, _ = self.__server.accept()
-                conn.settimeout(1)
+                conn.settimeout(SOCKET_TIMEOUT)
                 self.__targets.put(conn)
             except TimeoutError:
                 pass
@@ -41,9 +41,9 @@ class Wire:
     def __init__(self, port: int):
         Thread(target=self.forward).start()
         self.__server = socket.create_server((HOSTNAME, port))
-        self.__server.settimeout(1)
+        self.__server.settimeout(SOCKET_TIMEOUT)
 
     def __del__(self):
-        logger.info("closing sockets")
+        logger.debug("closing sockets")
         while not self.__targets.empty():
             self.__targets.get_nowait().close()

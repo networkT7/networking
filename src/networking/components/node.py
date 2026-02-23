@@ -5,16 +5,15 @@ from threading import Thread
 from typing import override
 
 from networking.collections.ts_dict import TSDict
+from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
+from networking.constants import BYTE_ENCODING_TYPE, BROADCAST_MAC
 from networking.frames import MACFrame, IPFrame, DeserializationException
 from networking.log_format import create_logger
-from networking.protocol import (
-    BYTE_ENCODING_TYPE,
+from networking.types import (
     MACaddr,
     IPaddr,
     IPProtocol,
     NodeConfig,
-    HOSTNAME,
-    BROADCAST_MAC,
 )
 
 
@@ -29,7 +28,7 @@ class Node:
     # receiving
     def rcv_MAC_frame(self) -> MACFrame:
         while True:
-            data = self.__socket.recv(1000)
+            data = self.__socket.recv(RECEIVE_SIZE)
             frame = MACFrame.from_bytes(data)
 
             match frame:
@@ -88,7 +87,6 @@ class Node:
     def resolve_IP(self, dst: IPaddr) -> MACaddr:
         self.__logger.debug(f"resolving ip 0x{dst:02x}")
         if dst not in self.__ip_mapping:
-            self.__logger.debug("mapping not saved, requesting")
             self.send_ARP_request(dst)
         mac = self.__ip_mapping.block_until(dst)
         self.__logger.debug(f"resolved, mac is {mac}")
@@ -114,7 +112,7 @@ class Node:
     def __init__(self, node_config: NodeConfig, wire_port: int):
         self.Mac = node_config["MAC"]
         self.Ip = node_config["IP"]
-        self.__logger = create_logger(self.Mac)
+        self.__logger = create_logger(self.Mac, level=LOGGING_LEVEL)
         self.__socket = socket.create_connection((HOSTNAME, wire_port))
         self.__logger.info("connected to wire")
 
@@ -122,4 +120,4 @@ class Node:
 
     def __del__(self):
         self.__socket.close()
-        self.__logger.info("closing node")
+        self.__logger.debug("closing node")

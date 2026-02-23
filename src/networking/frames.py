@@ -2,8 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import override
 
-from networking.protocol import (
-    BYTE_ENCODING_TYPE,
+from networking.constants import BYTE_ENCODING_TYPE
+from networking.types import (
     MACaddr,
     IPaddr,
     valid_MAC,

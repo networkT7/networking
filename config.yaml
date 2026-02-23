@@ -1,5 +1,11 @@
 # yaml-language-server: $schema=./config-schema.yaml
 
+config:
+  HOSTNAME: 127.0.0.1
+  LOGGING_LEVEL: DEBUG
+  RECEIVE_SIZE: 1000
+  SOCKET_TIMEOUT: 1
+
 nodes:
   N1:
     MAC: N1
