@@ -2,7 +2,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import override
 
-from networking.protocol import MACaddr, IPaddr, _valid_MAC, _valid_IP, IPProtocol
+from networking.protocol import (
+    BYTE_ENCODING_TYPE,
+    MACaddr,
+    IPaddr,
+    valid_MAC,
+    valid_IP,
+    IPProtocol,
+)
 
 
 class DeserializationException(Exception):
@@ -17,11 +24,13 @@ class MACFrame:
     This class includes convenience methods for serde
     of MAC_frames sent between nodes
     """
+
     __src: MACaddr
     __dst: MACaddr
     __length: int
     __data: bytes
 
+    @staticmethod
     def from_bytes(arr: bytes) -> MACFrame:
         """
         Deserialises a MAC frame from bytes
@@ -34,9 +43,15 @@ class MACFrame:
         data_len = arr[4]
         actual_len = len(data)
         if data_len != actual_len:
-            raise DeserializationException(f"data size {data_len} doesn't match with actual size {actual_len}")  # noqa
+            raise DeserializationException(
+                f"data size {data_len} doesn't match with actual size {actual_len}"
+            )
 
-        return MACFrame(arr[:2].decode(), arr[2:4].decode(), data)
+        return MACFrame(
+            arr[:2].decode(BYTE_ENCODING_TYPE),
+            arr[2:4].decode(BYTE_ENCODING_TYPE),
+            data,
+        )
 
     @property
     def data(self) -> bytes:
@@ -60,9 +75,9 @@ class MACFrame:
         return self.__dst
 
     @override
-    def __init__(self, src: MACaddr, dst: MACaddr, data: str):
-        assert _valid_MAC(src), "not a valid src MAC"
-        assert _valid_MAC(dst), "not a valid dst MAC"
+    def __init__(self, src: MACaddr, dst: MACaddr, data: bytes):
+        assert valid_MAC(src), "not a valid src MAC"
+        assert valid_MAC(dst), "not a valid dst MAC"
 
         length = len(data)
         assert length <= 256, "data is too large for frame"
@@ -76,7 +91,10 @@ class MACFrame:
         return self.__length
 
     def __bytes__(self):
-        return f"{self.__src}{self.__dst}{chr(self.__length)}".encode() + self.__data  # noqa
+        return (
+            f"{self.__src}{self.__dst}{chr(self.__length)}".encode(BYTE_ENCODING_TYPE)
+            + self.__data
+        )
 
 
 @dataclass
@@ -86,12 +104,14 @@ class IPFrame:
     This class includes convenience methods for serde
     of IP_frames sent between nodes
     """
+
     __src: IPaddr
     __dst: IPaddr
     __protocol: IPProtocol
     __length: int
     __data: bytes
 
+    @staticmethod
     def from_bytes(arr: bytes) -> IPFrame:
         """
         Deserialises an IP frame from bytes
@@ -109,7 +129,9 @@ class IPFrame:
         data_len = arr[3]
         actual_len = len(data)
         if data_len != actual_len:
-            raise DeserializationException(f"data size {data_len} doesn't match with actual size {actual_len}")  # noqa
+            raise DeserializationException(
+                f"data size {data_len} doesn't match with actual size {actual_len}"
+            )
 
         return IPFrame(arr[0], arr[1], protocol, data)
 
@@ -142,9 +164,11 @@ class IPFrame:
         return self.__protocol
 
     @override
-    def __init__(self, src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: str):  # noqa
-        assert _valid_IP(src), "not a valid src IP"
-        assert _valid_IP(dst), "not a valid dst IP"
+    def __init__(
+        self, src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: bytes = b""
+    ):
+        assert valid_IP(src), "not a valid src IP"
+        assert valid_IP(dst), "not a valid dst IP"
         assert protocol in IPProtocol, "not a valid protocol"
 
         length = len(data)
@@ -160,4 +184,9 @@ class IPFrame:
         return self.__length
 
     def __bytes__(self):
-        return f"{chr(self.__src)}{chr(self.__dst)}{chr(self.__protocol.value)}{chr(self.__length)}".encode() + self.__data  # noqa
+        return (
+            f"{chr(self.__src)}{chr(self.__dst)}{chr(self.__protocol.value)}{chr(self.__length)}".encode(
+                BYTE_ENCODING_TYPE
+            )
+            + self.__data
+        )

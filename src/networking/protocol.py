@@ -11,6 +11,7 @@ IPaddr = int
 
 class IPProtocol(IntEnum):
     PING = 1
+    ARP = 2
 
 
 class NodeConfig(TypedDict):
@@ -19,9 +20,9 @@ class NodeConfig(TypedDict):
     wire: str
 
 
-def _valid_MAC(MAC: str) -> TypeIs[MACaddr]:
+def valid_MAC(MAC: str) -> TypeIs[MACaddr]:
     return isinstance(MAC, str) and len(MAC) == 2
 
 
-def _valid_IP(IP: int) -> TypeIs[IPaddr]:
+def valid_IP(IP: int) -> TypeIs[IPaddr]:
     return isinstance(IP, int) and IP > 0 and IP < 256
