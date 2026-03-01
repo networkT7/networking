@@ -55,9 +55,21 @@ class Node:
             case IPFrame(src, self.Ip, IPProtocol.ARP, _, b"res"):
                 self.save_IP_mapping(src, src_mac)
                 return ip_frame
+
             case IPFrame(src, self.Ip, IPProtocol.ARP, _, b"req"):
+                self.save_IP_mapping(src, src_mac)
                 self.send_ARP_response(src_mac, src)
                 return ip_frame
+            
+            case IPFrame(src, self.Ip, IPProtocol.PING, _, b"req"):
+                self.__logger.info(f"Ping request received from 0x{src:02x}")
+                self.send_IP_frame(src, IPProtocol.PING, b"res")
+                return ip_frame
+
+            case IPFrame(src, self.Ip, IPProtocol.PING, _, b"res"):
+                self.__logger.info(f"Ping reply received from 0x{src:02x}")
+                return ip_frame
+
             case _:
                 return None
 
@@ -68,8 +80,28 @@ class Node:
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
         self.__logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
-        resolved_mac = self.resolve_IP(dst)
-        self.send_MAC_frame(resolved_mac, bytes(IPFrame(self.Ip, dst, protocol, data)))
+
+        # Determine next hop (basic subnet logic)
+        if (self.Ip & 0xF0) == (dst & 0xF0):
+            # Same LAN → send directly
+            next_hop_ip = dst
+        else:
+            # Different LAN → send to router interface
+            if (self.Ip & 0xF0) == 0x10:
+                next_hop_ip = 0x11  # R1
+            elif (self.Ip & 0xF0) == 0x20:
+                next_hop_ip = 0x21  # R2
+            elif (self.Ip & 0xF0) == 0x30:
+                next_hop_ip = 0x31  # R3
+            else:
+                raise Exception("Unknown subnet")
+
+        resolved_mac = self.resolve_IP(next_hop_ip)
+
+        self.send_MAC_frame(
+            resolved_mac,
+            bytes(IPFrame(self.Ip, dst, protocol, data)),
+        )
 
     # address resolution
     def save_IP_mapping(self, ip: IPaddr, mac: MACaddr):
@@ -99,11 +131,11 @@ class Node:
             match data.split():
                 case ["MAC", dst, *data]:
                     self.send_MAC_frame(dst, " ".join(data).encode(BYTE_ENCODING_TYPE))
-                case ["IP", dst, protocol, *data]:
+                case ["IP", dst, protocol]:
                     self.send_IP_frame(
                         int(dst, base=16),
                         IPProtocol[protocol],
-                        " ".join(data).encode(BYTE_ENCODING_TYPE),
+                        b"req",
                     )
                 case _:
                     pass
