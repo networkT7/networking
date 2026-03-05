@@ -29,7 +29,22 @@ class Node:
     def rcv_MAC_frame(self) -> MACFrame:
         while True:
             data = self.__socket.recv(RECEIVE_SIZE)
-            frame = MACFrame.from_bytes(data)
+            try:
+                frame = MACFrame.from_bytes(data)
+            except DeserializationException:
+                continue
+
+            if self.sniffing and frame.destination not in [self.Mac, BROADCAST_MAC]:
+                try:
+                    ip = IPFrame.from_bytes(frame.data)
+                    self.__logger.warning(
+                        f"[SNIFF] src={frame.source} dst={frame.destination} | "
+                        f"IP src=0x{ip.source:02x} dst=0x{ip.destination:02x} "
+                        f"proto={IPProtocol(ip.protocol).name} data={ip.data}"
+                    )
+                except DeserializationException:
+                    self.__logger.warning(f"[SNIFF] raw frame: src={frame.source} dst={frame.destination} data={frame.data}")
+                continue 
 
             match frame:
                 case MACFrame(src, dst, _, bites) if dst in [self.Mac, BROADCAST_MAC]:
@@ -70,6 +85,10 @@ class Node:
                 self.__logger.info(f"Ping reply received from 0x{src:02x}")
                 return ip_frame
 
+            case IPFrame(src, self.Ip, IPProtocol.DATA, _, data):
+                self.__logger.info(f"[DATA] Message from 0x{src:02x}: {data.decode(BYTE_ENCODING_TYPE)}")
+                return ip_frame
+
             case _:
                 return None
 
@@ -103,6 +122,27 @@ class Node:
             bytes(IPFrame(self.Ip, dst, protocol, data)),
         )
 
+    def send_spoofed_IP_frame(self, spoof_src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: bytes):
+        self.__logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
+
+        if (self.Ip & 0xF0) == (dst & 0xF0):
+            next_hop_ip = dst
+        else:
+            if (self.Ip & 0xF0) == 0x10:
+                next_hop_ip = 0x11
+            elif (self.Ip & 0xF0) == 0x20:
+                next_hop_ip = 0x21
+            elif (self.Ip & 0xF0) == 0x30:
+                next_hop_ip = 0x31
+            else:
+                raise Exception("Unknown subnet")
+
+        resolved_mac = self.resolve_IP(next_hop_ip)
+        self.send_MAC_frame(
+            resolved_mac,
+            bytes(IPFrame(spoof_src, dst, protocol, data)),
+        )
+        
     # address resolution
     def save_IP_mapping(self, ip: IPaddr, mac: MACaddr):
         self.__ip_mapping[ip] = mac
@@ -137,6 +177,19 @@ class Node:
                         IPProtocol[protocol],
                         b"req",
                     )
+                case ["SPOOF", fake_src, dst, *msg]:
+                    self.send_spoofed_IP_frame(
+                        int(fake_src, base=16),
+                        int(dst, base=16),
+                        IPProtocol.DATA,         
+                        " ".join(msg).encode(BYTE_ENCODING_TYPE),
+                    )
+                case ["SNIFF", "on"]:
+                    self.sniffing = True
+                    print("[*] Sniffing enabled")
+                case ["SNIFF", "off"]:
+                    self.sniffing = False
+                    print("[*] Sniffing disabled")
                 case _:
                     pass
 
@@ -144,6 +197,7 @@ class Node:
     def __init__(self, node_config: NodeConfig, wire_port: int):
         self.Mac = node_config["MAC"]
         self.Ip = node_config["IP"]
+        self.sniffing: bool = False
         self.__logger = create_logger(self.Mac, level=LOGGING_LEVEL)
         self.__socket = socket.create_connection((HOSTNAME, wire_port))
         self.__logger.info("connected to wire")
