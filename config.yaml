@@ -27,22 +27,39 @@ nodes:
     IP: 0x32
     wire: W3
 
-  R1:
-    MAC: R1
-    IP: 0x11
-    wire: W1
-
-  R2:
-    MAC: R2
-    IP: 0x21
-    wire: W2
-
-  R3:
-    MAC: R3
-    IP: 0x31
-    wire: W3
-
 wires:
-  W1: 8001
-  W2: 8002
-  W3: 8003
+  W1:
+    port: 8000
+    subnet: 0x10
+    subnetMask: 0xF0
+  W2:
+    port: 8001
+    subnet: 0x20
+    subnetMask: 0xF0
+  W3:
+    port: 8002
+    subnet: 0x30
+    subnetMask: 0xF0
+
+routers:
+  interfaces:
+    R1:
+      MAC: R1
+      IP: 0x11
+      wire: W1
+
+    R2:
+      MAC: R2
+      IP: 0x21
+      wire: W2
+
+    R3:
+      MAC: R3
+      IP: 0x31
+      wire: W3
+
+  routing_table:
+    0x12: R1
+    0x13: R1
+    0x22: R2
+    0x32: R3

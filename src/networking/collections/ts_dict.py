@@ -2,7 +2,28 @@ from queue import SimpleQueue
 
 
 class TSDict[K, V]:
+    """
+    A thread safe-ish dictionary implementation built for multi-threaded classes
+    """
+
     __queue: SimpleQueue[tuple[K, V]] = SimpleQueue()
+
+    def get(self, key: K) -> V | None:
+        """
+        Attempt to get the value associated with the key without waiting
+        """
+        for k, v in self:
+            if k == key:
+                return v
+        return None
+
+    def block_until(self, key: K) -> V:
+        """
+        Block execution until the required mapping is created, and return the associated value
+        """
+        while key not in self:
+            pass
+        return self[key]
 
     def __contains__(self, key: K) -> bool:
         v = self.get(key)
@@ -26,16 +47,3 @@ class TSDict[K, V]:
             if k == key:
                 self.__queue.put((key, value))
         self.__queue.put((key, value))
-
-    def get(self, key: K) -> V | None:
-        for k, v in self:
-            if k == key:
-                return v
-        return None
-
-    def block_until(self, key: K) -> V:
-        while True:
-            k, v = self.__queue.get()
-            self.__queue.put((k, v))
-            if k == key:
-                return v

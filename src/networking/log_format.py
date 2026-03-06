@@ -32,7 +32,7 @@ class CustomFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def create_logger(name: str, level: int = logging.DEBUG) -> logging.Logger:
+def create_logger(name: str, level: int | str = logging.DEBUG) -> logging.Logger:
     handler = logging.StreamHandler()
     handler.setFormatter(CustomFormatter())
 

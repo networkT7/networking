@@ -9,6 +9,7 @@ logger = create_logger(__name__)
 
 
 class Wire:
+    __server: socket.socket
     __targets: SimpleQueue[socket.SocketType] = SimpleQueue()
 
     def _broadcast(self, msg: bytes):
@@ -39,7 +40,7 @@ class Wire:
                 pass
 
     def __init__(self, port: int):
-        Thread(target=self.forward).start()
+        Thread(target=self.forward, daemon=True).start()
         self.__server = socket.create_server((HOSTNAME, port))
         self.__server.settimeout(SOCKET_TIMEOUT)
 

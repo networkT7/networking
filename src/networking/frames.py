@@ -75,7 +75,7 @@ class MACFrame:
         return self.__dst
 
     @override
-    def __init__(self, src: MACaddr, dst: MACaddr, data: bytes):
+    def __init__(self, src: str, dst: MACaddr, data: bytes):
         assert valid_MAC(src), "not a valid src MAC"
         assert valid_MAC(dst), "not a valid dst MAC"
 

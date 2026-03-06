@@ -9,6 +9,10 @@ $defs:
   wirepattern:
     type: string
     pattern: ^W\d$
+  IP:
+    type: number
+    minimum: 0x0
+    exclusiveMaximum: 0x100
 
 properties:
   config:
@@ -32,6 +36,7 @@ properties:
       - LOGGING_LEVEL
       - RECEIVE_SIZE
       - SOCKET_TIMEOUT
+    additionalProperties: false
   nodes:
     type: object
     patternProperties:
@@ -41,9 +46,7 @@ properties:
           MAC:
             $ref: "#/$defs/nodepattern"
           IP:
-            type: number
-            minimum: 0x0
-            exclusiveMaximum: 0x100
+            $ref: "#/$defs/IP"
           wire:
             $ref: "#/$defs/wirepattern"
         additionalProperties: false
@@ -56,11 +59,55 @@ properties:
     type: object
     patternProperties:
       ^W\d$:
-        type: number
+        type: object
+        properties:
+          port:
+            type: number
+          subnet:
+            type: number
+          subnetMask:
+            type: number
+        required:
+          - port
+          - subnet
+          - subnetMask
+        additionalProperties: false
+    additionalProperties: false
+  routers:
+    type: object
+    properties:
+      routing_table:
+        type: object
+        patternProperties:
+          ^0x\d\d$:
+            type: string
+            pattern: ^R\d$
+      interfaces:
+        type: object
+        patternProperties:
+          ^R\d$:
+            type: object
+            properties:
+              MAC:
+                type: string
+                pattern: ^R\d$
+              IP:
+                $ref: "#/$defs/IP"
+              wire:
+                $ref: "#/$defs/wirepattern"
+            required:
+              - MAC
+              - IP
+              - wire
+    additionalProperties: false
+    required:
+      - interfaces
+      - routing_table
 
 required:
   - config
   - nodes
   - wires
+  - routers
 
 additionalProperties: false
