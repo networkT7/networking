@@ -1,5 +1,5 @@
 from enum import IntEnum
-from typing import TypeIs, TypedDict
+from typing import TypeIs, TypedDict, NotRequired
 
 MACaddr = str
 IPaddr = int
@@ -14,6 +14,7 @@ class NodeConfig(TypedDict):
     MAC: MACaddr
     IP: IPaddr
     wire: str
+    firewall: NotRequired[bool]
 
 
 class Config(TypedDict):
@@ -30,8 +31,8 @@ class MasterConfig(TypedDict):
 
 
 def valid_MAC(MAC: str) -> TypeIs[MACaddr]:
-    return isinstance(MAC, str) and len(MAC) == 2
+    return len(MAC) == 2
 
 
 def valid_IP(IP: int) -> TypeIs[IPaddr]:
-    return isinstance(IP, int) and IP > 0 and IP < 256
+    return IP > 0 and IP < 256

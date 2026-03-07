@@ -5,7 +5,7 @@ title: Networking config schema
 $defs:
   nodepattern:
     type: string
-    pattern: ^N\d$
+    pattern: ^[NR]\d$
   wirepattern:
     type: string
     pattern: ^W\d$
@@ -35,7 +35,7 @@ properties:
   nodes:
     type: object
     patternProperties:
-      ^N\d$:
+      ^[NR]\d$:
         type: object
         properties:
           MAC:
@@ -46,6 +46,8 @@ properties:
             exclusiveMaximum: 0x100
           wire:
             $ref: "#/$defs/wirepattern"
+          firewall:
+            type: boolean
         additionalProperties: false
         required:
           - MAC
