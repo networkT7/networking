@@ -1,8 +1,7 @@
-from dataclasses import dataclass
 from logging import Logger
 import socket
 from threading import Thread
-from typing import override
+from typing import Callable, override
 
 from networking.collections.ts_dict import TSDict
 from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
@@ -17,8 +16,36 @@ from networking.types import (
     WireConfig,
 )
 
+IPFramePredicate = Callable[["Node", IPFrame], bool]
+""" check if the current IP frame should be handled by the handler """
 
-@dataclass
+IPFrameHandler = Callable[["Node", IPFrame, MACaddr], bool]
+"""
+runs on the IP frame to be handled
+the return value determines if the handling chain should be stopped
+"""
+
+
+class FrameHandlerClass:
+    predicate: IPFramePredicate
+    handler: IPFrameHandler
+
+    def __init__(self, predicate: IPFramePredicate, handler: IPFrameHandler):
+        self.predicate = predicate
+        self.handler = handler
+
+    def try_handle(self, node: "Node", ip_frame: IPFrame, src_mac: MACaddr) -> bool:
+        return self.predicate(node, ip_frame) and self.handler(node, ip_frame, src_mac)
+
+
+HELP = """
+SEND <IP> <message>
+PING <IP>
+SPOOF <spoofed IP> <IP> <message>
+SNIFF {{on|off}}
+"""
+
+
 class Node:
     Mac: MACaddr
     Ip: IPaddr
@@ -26,8 +53,9 @@ class Node:
     subnet_mask: IPaddr
     logger: Logger
     socket: socket.SocketType
-    sniffing: bool = False
-    ip_mapping: TSDict[IPaddr, MACaddr] = TSDict()
+    sniffing: bool
+    ip_mapping: TSDict[IPaddr, MACaddr]
+    ip_handlers: list[FrameHandlerClass]
 
     # receiving
     def rcv_MAC_frame(self) -> MACFrame:
@@ -47,8 +75,8 @@ class Node:
                         ip = IPFrame.from_bytes(frame.data)
                         self.logger.warning(
                             f"[SNIFF] src={src} dst={dst} | "
-                            f"IP src=0x{ip.source:02x} dst=0x{ip.destination:02x} "
-                            f"proto={ip.protocol.name} data={ip.data}"
+                            + f"IP src=0x{ip.source:02x} dst=0x{ip.destination:02x} "
+                            + f"proto={ip.protocol.name} data={ip.data}"
                         )
                     except DeserializationException:
                         self.logger.warning(
@@ -57,12 +85,12 @@ class Node:
                 case _:
                     pass
 
-    def rcv_IP_frame(self, byte_arr: bytes, src_mac: MACaddr) -> IPFrame | None:
+    def rcv_IP_frame(self, byte_arr: bytes, src_mac: MACaddr):
         try:
             ip_frame = IPFrame.from_bytes(byte_arr)
         except DeserializationException as e:
             self.logger.warning(str(e))
-            return None
+            return
 
         self.logger.info(
             f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{
@@ -70,32 +98,14 @@ class Node:
                 IPProtocol(ip_frame.protocol).name
             }"
         )
-        match ip_frame:
-            case IPFrame(src, self.Ip, IPProtocol.ARP, _, b"res"):
-                self.logger.debug(f"ARP response received from 0x{src:02x}")
-                self.save_IP_mapping(src, src_mac)
 
-            case IPFrame(src, self.Ip, IPProtocol.ARP, _, b"req"):
-                self.logger.debug(f"ARP request received from 0x{src:02x}")
-                self.save_IP_mapping(src, src_mac)
-                self.send_ARP_response(src_mac, src)
+        for handler in self.ip_handlers:
+            if handler.try_handle(self, ip_frame, src_mac):
+                return
 
-            case IPFrame(src, self.Ip, IPProtocol.PING, _, b"req"):
-                self.logger.info(f"Ping request received from 0x{src:02x}")
-                self.send_IP_frame(src, IPProtocol.PING, b"res")
-
-            case IPFrame(src, self.Ip, IPProtocol.PING, _, b"res"):
-                self.logger.info(f"Ping reply received from 0x{src:02x}")
-
-            case IPFrame(src, self.Ip, IPProtocol.DATA, _, data):
-                self.logger.info(
-                    f"[DATA] Message from 0x{src:02x}: {data.decode(BYTE_ENCODING_TYPE)}"
-                )
-
-            case _:
-                pass
-
-        return ip_frame
+    def add_handler(self, handler_class: FrameHandlerClass):
+        self.ip_handlers.append(handler_class)
+        return self
 
     # sending
     def send_MAC_frame(self, dst: MACaddr, data: bytes):
@@ -104,22 +114,18 @@ class Node:
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
         self.logger.debug(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
-        self.__manual_send_IP_frame(self.Ip, dst, protocol, data)
+        self.send_spoofed_IP_frame(self.Ip, dst, protocol, data)
 
     def send_spoofed_IP_frame(
         self, spoof_src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: bytes
     ):
-        self.logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
-        self.__manual_send_IP_frame(spoof_src, dst, protocol, data)
-
-    def __manual_send_IP_frame(
-        self, src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: bytes
-    ):
+        if self.Ip != spoof_src:
+            self.logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
         resolved_mac = self.resolve_IP(dst)
 
         self.send_MAC_frame(
             resolved_mac,
-            bytes(IPFrame(src, dst, protocol, data)),
+            bytes(IPFrame(spoof_src, dst, protocol, data)),
         )
 
     # address resolution
@@ -152,19 +158,18 @@ class Node:
 
     # object methods
     def input(self):
+        print("Type help to get all possible commands")
         while True:
-            data = input(
-                f"Format: MAC {{dst}} msg OR IP {{dst}} [{'|'.join([i.name for i in IPProtocol])}]: "
-            )
+            data = input("> ")
             match data.split():
-                case ["MAC", dst, *data]:
-                    self.send_MAC_frame(dst, " ".join(data).encode(BYTE_ENCODING_TYPE))
-                case ["IP", dst, protocol, *msg]:
+                case ["SEND", dst, *msg]:
                     self.send_IP_frame(
                         int(dst, base=16),
-                        IPProtocol[protocol],
+                        IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
                     )
+                case ["PING", dst]:
+                    self.send_IP_frame(int(dst, base=16), IPProtocol.PING, b"req")
                 case ["SPOOF", fake_src, dst, *msg]:
                     self.send_spoofed_IP_frame(
                         int(fake_src, base=16),
@@ -172,14 +177,11 @@ class Node:
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
                     )
-                case ["SNIFF", "on"]:
-                    self.sniffing = True
-                    print("[*] Sniffing enabled")
-                case ["SNIFF", "off"]:
-                    self.sniffing = False
-                    print("[*] Sniffing disabled")
+                case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
+                    self.sniffing = True if mode.lower() == "on" else False
+                    print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
                 case _:
-                    pass
+                    print(HELP)
 
     @override
     def __init__(self, node_config: NodeConfig, wire_config: WireConfig):
@@ -189,6 +191,9 @@ class Node:
         self.subnet = wire_config["subnet"]
         self.subnet_mask = wire_config["subnetMask"]
         self.socket = socket.create_connection((HOSTNAME, wire_config["port"]))
+        self.sniffing = False
+        self.ip_mapping = TSDict()
+        self.ip_handlers = []
         self.logger.info("connected to wire")
 
         Thread(target=self.rcv_MAC_frame, daemon=True).start()

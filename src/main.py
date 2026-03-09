@@ -1,5 +1,12 @@
 from sys import argv, executable
 
+from networking.components.handlers import (
+    ARPRequestHandler,
+    ARPResponseHandler,
+    DataHandler,
+    PingRequestHandler,
+    PingResponseHandler,
+)
 from networking.config import config
 from networking.components.node import Node
 from networking.components.wire import Wire
@@ -40,10 +47,18 @@ match argv:
         c = config["nodes"][node_name]
         wire = config["wires"][c["wire"]]
 
-        Node(c, wire).input()
+        (
+            Node(c, wire)
+            .add_handler(ARPRequestHandler())
+            .add_handler(ARPResponseHandler())
+            .add_handler(PingRequestHandler())
+            .add_handler(PingResponseHandler())
+            .add_handler(DataHandler())
+            .input()
+        )
 
     case [_, "router"]:
-        Router(config["routers"], config["nodes"], config["wires"])
+        Router(config["routers"], config["wires"])
         input("Router running... Press Enter to exit.\n")
 
     case _:

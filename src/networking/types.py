@@ -30,19 +30,16 @@ class WireConfig(TypedDict):
     subnetMask: int
 
 
-RouterInterfaceConfig = NodeConfig
-
-
 class RouterConfig(TypedDict):
-    interfaces: dict[str, RouterInterfaceConfig]
-    routing_table: dict[str, str]
+    interfaces: dict[str, NodeConfig]
+    routing_table: dict[int, str]
 
 
 class Config(TypedDict):
     config: MetaConf
     nodes: dict[str, NodeConfig]
     wires: dict[str, WireConfig]
-    routers: dict[str, RouterConfig]
+    routers: RouterConfig
 
 
 def valid_MAC(MAC: str) -> TypeGuard[MACaddr]:

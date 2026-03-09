@@ -6,7 +6,10 @@ class TSDict[K, V]:
     A thread safe-ish dictionary implementation built for multi-threaded classes
     """
 
-    __queue: SimpleQueue[tuple[K, V]] = SimpleQueue()
+    __queue: SimpleQueue[tuple[K, V]]
+
+    def __init__(self):
+        self.__queue = SimpleQueue()
 
     def get(self, key: K) -> V | None:
         """
