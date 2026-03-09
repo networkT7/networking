@@ -49,6 +49,8 @@ properties:
             $ref: "#/$defs/IP"
           wire:
             $ref: "#/$defs/wirepattern"
+          firewall:
+            type: boolean
         additionalProperties: false
         required:
           - MAC

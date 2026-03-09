@@ -3,6 +3,7 @@ import socket
 from threading import Thread
 from typing import Callable, override
 
+from networking.firewall import Firewall, FirewallRule, FirewallAction
 from networking.collections.ts_dict import TSDict
 from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
 from networking.constants import BYTE_ENCODING_TYPE, BROADCAST_MAC
@@ -42,7 +43,12 @@ HELP = """
 SEND <IP> <message>
 PING <IP>
 SPOOF <spoofed IP> <IP> <message>
-SNIFF {{on|off}}
+SNIFF on|off
+FW
+FW ADD ACCEPT|DROP <IP>
+FW REMOVE <rule_id>
+FW LIST
+FW DEFAULT ACCEPT|DROP
 """
 
 
@@ -51,8 +57,8 @@ class Node:
     Ip: IPaddr
     subnet: IPaddr
     subnet_mask: IPaddr
-    logger: Logger
-    socket: socket.SocketType
+    _logger: Logger
+    _socket: socket.SocketType
     sniffing: bool
     ip_mapping: TSDict[IPaddr, MACaddr]
     ip_handlers: list[FrameHandlerClass]
@@ -60,26 +66,28 @@ class Node:
     # receiving
     def rcv_MAC_frame(self) -> MACFrame:
         while True:
-            data = self.socket.recv(RECEIVE_SIZE)
-            try:
-                frame = MACFrame.from_bytes(data)
-            except DeserializationException:
-                continue
+            data = self._socket.recv(RECEIVE_SIZE)
+            frame = MACFrame.from_bytes(data)
 
             match frame:
-                case MACFrame(src, dst, _, bites) if dst in [self.Mac, BROADCAST_MAC]:
-                    self.logger.info(f"rcving {bites} from {src} to {dst}")
+                case MACFrame(src, dst, _, bites) if dst in (
+                    self.Mac,
+                    BROADCAST_MAC,
+                ):
+                    self._logger.info(
+                        f"receiving [MAC] src={src} dst={dst} len={len(bites)} data={bites.hex()}"
+                    )
                     self.rcv_IP_frame(bites, src)
                 case MACFrame(src, dst, _, data) if self.sniffing:
                     try:
                         ip = IPFrame.from_bytes(frame.data)
-                        self.logger.warning(
+                        self._logger.warning(
                             f"[SNIFF] src={src} dst={dst} | "
                             + f"IP src=0x{ip.source:02x} dst=0x{ip.destination:02x} "
                             + f"proto={ip.protocol.name} data={ip.data}"
                         )
                     except DeserializationException:
-                        self.logger.warning(
+                        self._logger.warning(
                             f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
                         )
                 case _:
@@ -89,10 +97,16 @@ class Node:
         try:
             ip_frame = IPFrame.from_bytes(byte_arr)
         except DeserializationException as e:
-            self.logger.warning(str(e))
+            self._logger.warning(str(e))
             return
 
-        self.logger.info(
+        # Firewall check
+        if self.firewall is not None and not self.firewall.check(ip_frame):
+            self._logger.warning(
+                f"Firewall dropped packet from 0x{ip_frame.source:02x} to 0x{ip_frame.destination:02x} "
+            )
+
+        self._logger.info(
             f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{
                 ip_frame.destination:02x} with protocol {
                 IPProtocol(ip_frame.protocol).name
@@ -109,18 +123,20 @@ class Node:
 
     # sending
     def send_MAC_frame(self, dst: MACaddr, data: bytes):
-        self.logger.debug(f"sending {data} from {self.Mac} to {dst}")
-        self.socket.send(bytes(MACFrame(self.Mac, dst, data)))
+        self._logger.info(
+            f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
+        )
+        self._socket.sendall(bytes(MACFrame(self.Mac, dst, data)))
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
-        self.logger.debug(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
+        self._logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
         self.send_spoofed_IP_frame(self.Ip, dst, protocol, data)
 
     def send_spoofed_IP_frame(
         self, spoof_src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: bytes
     ):
         if self.Ip != spoof_src:
-            self.logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
+            self._logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
         resolved_mac = self.resolve_IP(dst)
 
         self.send_MAC_frame(
@@ -149,11 +165,11 @@ class Node:
             dst if dst & self.subnet_mask == self.subnet else self.subnet | 0x01
         )
 
-        self.logger.debug(f"resolving ip 0x{next_hop_ip:02x}")
+        self._logger.debug(f"resolving ip 0x{next_hop_ip:02x}")
         if next_hop_ip not in self.ip_mapping:
             self.send_ARP_request(next_hop_ip)
         mac = self.ip_mapping.block_until(next_hop_ip)
-        self.logger.debug(f"resolved, mac is {mac}")
+        self._logger.debug(f"resolved, mac is {mac}")
         return mac
 
     # object methods
@@ -180,6 +196,50 @@ class Node:
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
                     self.sniffing = True if mode.lower() == "on" else False
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
+                # Firewall commands
+                case ["FW", "ADD", action_str, src_ip_hex] if self.firewall is not None:
+                    try:
+                        action = FirewallAction(action_str.upper())
+                        src_ip = int(src_ip_hex, base=16)
+                        rule = FirewallRule(src_ip=src_ip, protocol=None, action=action)
+                        index = self.firewall.add_rule(rule)
+                        print(f"Added firewall rule #{index}: {rule}")
+                    except (ValueError, KeyError) as e:
+                        print(f"Invalid firewall rule: {e}")
+
+                case ["FW", "REMOVE", index_str] if self.firewall is not None:
+                    try:
+                        index = int(index_str)
+                        if self.firewall.remove_rule(index):
+                            print(f"Removed firewall rule #{index}")
+                        else:
+                            print(
+                                f"Failed to remove firewall rule #{index}: Invalid index"
+                            )
+                    except ValueError:
+                        print(f"Invalid firewall rule index: {index_str}")
+
+                case ["FW", "LIST"] if self.firewall is not None:
+                    for i in self.firewall.list_rules():
+                        print(i)
+
+                case ["FW", "DEFAULT", policy_str] if self.firewall is not None:
+                    try:
+                        policy = FirewallAction(policy_str.upper())
+                        self.firewall.set_default_policy(policy)
+                        print(f"Set default firewall policy to {policy.value}")
+                    except KeyError:
+                        print("Invalid policy. Policy must be 'accept' or 'drop'")
+
+                case ["FW", *_]:
+                    if self.firewall is None:
+                        print("Firewall is not enabled on this node.")
+                    else:
+                        print("Usage: FW ADD <drop|accept> <src_ip_hex>")
+                        print("       FW REMOVE <rule_index>")
+                        print("       FW LIST")
+                        print("       FW DEFAULT <accept|drop>")
+
                 case _:
                     print(HELP)
 
@@ -187,17 +247,25 @@ class Node:
     def __init__(self, node_config: NodeConfig, wire_config: WireConfig):
         self.Mac = node_config["MAC"]
         self.Ip = node_config["IP"]
-        self.logger = create_logger(self.Mac, level=LOGGING_LEVEL)
+        self._logger = create_logger(self.Mac, level=LOGGING_LEVEL)
         self.subnet = wire_config["subnet"]
         self.subnet_mask = wire_config["subnetMask"]
-        self.socket = socket.create_connection((HOSTNAME, wire_config["port"]))
+        self._socket = socket.create_connection((HOSTNAME, wire_config["port"]))
         self.sniffing = False
         self.ip_mapping = TSDict()
         self.ip_handlers = []
-        self.logger.info("connected to wire")
+        self._logger.info("connected to wire")
+
+        if node_config.get("firewall", False):
+            self.firewall: Firewall | None = Firewall(
+                self._logger, default_policy=FirewallAction.ACCEPT
+            )
+            self._logger.info("Firewall enabled")
+        else:
+            self.firewall = None
 
         Thread(target=self.rcv_MAC_frame, daemon=True).start()
 
     def __del__(self):
-        self.socket.close()
-        self.logger.debug("closing node")
+        self._socket.close()
+        self._logger.debug("closing node")

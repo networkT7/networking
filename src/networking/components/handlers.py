@@ -18,7 +18,7 @@ class ARPRequestHandler(FrameHandlerClass):
     @staticmethod
     def on_request(node: Node, frame: IPFrame, src_mac: MACaddr):
         src = frame.source
-        node.logger.debug(f"ARP request received from 0x{src:02x}")
+        node._logger.debug(f"ARP request received from 0x{src:02x}")
         node.save_IP_mapping(src, src_mac)
         node.send_ARP_response(src_mac, src)
         return True
@@ -38,7 +38,7 @@ class ARPResponseHandler(FrameHandlerClass):
     @staticmethod
     def on_request(node: Node, frame: IPFrame, src_mac: MACaddr):
         src = frame.source
-        node.logger.debug(f"ARP response received from 0x{src:02x}")
+        node._logger.debug(f"ARP response received from 0x{src:02x}")
         node.save_IP_mapping(src, src_mac)
         return True
 
@@ -57,7 +57,7 @@ class PingRequestHandler(FrameHandlerClass):
     @staticmethod
     def on_request(node: Node, frame: IPFrame, _: MACaddr):
         src = frame.source
-        node.logger.info(f"Ping request received from 0x{src:02x}")
+        node._logger.info(f"Ping request received from 0x{src:02x}")
         node.send_IP_frame(src, IPProtocol.PING, b"res")
         return True
 
@@ -75,7 +75,7 @@ class PingResponseHandler(FrameHandlerClass):
 
     @staticmethod
     def on_request(node: Node, frame: IPFrame, _: MACaddr):
-        node.logger.info(f"Ping reply received from 0x{frame.source:02x}")
+        node._logger.info(f"Ping reply received from 0x{frame.source:02x}")
         return True
 
 
@@ -88,7 +88,7 @@ class DataHandler(FrameHandlerClass):
 
     @staticmethod
     def on_request(node: Node, frame: IPFrame, _: MACaddr):
-        node.logger.info(
+        node._logger.info(
             f"[DATA] Message from 0x{frame.source:02x}: {frame.data.decode(BYTE_ENCODING_TYPE)}"
         )
         return True

@@ -75,7 +75,7 @@ class MACFrame:
         return self.__dst
 
     @override
-    def __init__(self, src: str, dst: MACaddr, data: bytes):
+    def __init__(self, src: str, dst: str, data: bytes):
         assert valid_MAC(src), "not a valid src MAC"
         assert valid_MAC(dst), "not a valid dst MAC"
 
@@ -164,9 +164,7 @@ class IPFrame:
         return self.__protocol
 
     @override
-    def __init__(
-        self, src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: bytes = b""
-    ):
+    def __init__(self, src: int, dst: int, protocol: IPProtocol, data: bytes = b""):
         assert valid_IP(src), "not a valid src IP"
         assert valid_IP(dst), "not a valid dst IP"
         assert protocol in IPProtocol, "not a valid protocol"

@@ -21,7 +21,8 @@ nodes:
     MAC: N3
     IP: 0x22
     wire: W2
-
+    firewall: true
+    
   N4:
     MAC: N4
     IP: 0x32
