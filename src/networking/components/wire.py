@@ -9,7 +9,8 @@ logger = create_logger(__name__)
 
 
 class Wire:
-    __targets: SimpleQueue[socket.SocketType] = SimpleQueue()
+    __server: socket.socket
+    __targets: SimpleQueue[socket.SocketType]
 
     def _broadcast(self, msg: bytes):
         logger.info(f"sending {msg} to {self.__targets.qsize()} targets")
@@ -32,14 +33,15 @@ class Wire:
     def accept(self):
         while True:
             try:
-                conn, _ = self.__server.accept()
+                conn = self.__server.accept()[0]
                 conn.settimeout(SOCKET_TIMEOUT)
                 self.__targets.put(conn)
             except TimeoutError:
                 pass
 
     def __init__(self, port: int):
-        Thread(target=self.forward).start()
+        self.__targets = SimpleQueue()
+        Thread(target=self.forward, daemon=True).start()
         self.__server = socket.create_server((HOSTNAME, port))
         self.__server.settimeout(SOCKET_TIMEOUT)
 

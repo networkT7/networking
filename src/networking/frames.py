@@ -70,12 +70,12 @@ class MACFrame:
     @property
     def destination(self) -> MACaddr:
         """
-        Returns the encapsulated data
+        Returns the destination of the frame
         """
         return self.__dst
 
     @override
-    def __init__(self, src: MACaddr, dst: MACaddr, data: bytes):
+    def __init__(self, src: str, dst: str, data: bytes):
         assert valid_MAC(src), "not a valid src MAC"
         assert valid_MAC(dst), "not a valid dst MAC"
 
@@ -152,27 +152,25 @@ class IPFrame:
     @property
     def destination(self) -> IPaddr:
         """
-        Returns the encapsulated data
+        Returns the destination of the frame
         """
         return self.__dst
 
     @property
     def protocol(self) -> IPProtocol:
         """
-        Returns the encapsulated data
+        Returns the protocol used for the IP packet
         """
         return self.__protocol
 
     @override
-    def __init__(
-        self, src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: bytes = b""
-    ):
+    def __init__(self, src: int, dst: int, protocol: IPProtocol, data: bytes = b""):
         assert valid_IP(src), "not a valid src IP"
         assert valid_IP(dst), "not a valid dst IP"
         assert protocol in IPProtocol, "not a valid protocol"
 
         length = len(data)
-        assert length <= 252, "data is too large for frame"
+        assert length <= 256, "data is too large for frame"
 
         self.__src = src
         self.__dst = dst

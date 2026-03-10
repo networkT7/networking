@@ -1,148 +1,62 @@
-import socket
 from threading import Thread
 from logging import Logger
 
-from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
-from networking.frames import MACFrame, IPFrame
+from networking.components.handlers import (
+    ARPRequestHandler,
+    ARPResponseHandler,
+    PingRequestHandler,
+)
+from networking.components.node import FrameHandlerClass, Node
+from networking.config import LOGGING_LEVEL
+from networking.frames import IPFrame
 from networking.log_format import create_logger
-from networking.types import IPaddr, MACaddr, IPProtocol
-from networking.constants import BYTE_ENCODING_TYPE
-from networking.types import valid_IP
+from networking.types import MACaddr, IPProtocol, RouterConfig, WireConfig
 
 
 class Router:
+    logger: Logger = create_logger(__name__, level=LOGGING_LEVEL)
+    routing_table: dict[int, Node]
 
-    def __init__(self, config, wires):
+    def __init__(self, config: RouterConfig, wires: dict[str, WireConfig]):
         """
         config: full config["nodes"]
         wires: config["wires"]
         """
 
-        self.logger: Logger = create_logger("ROUTER", level=LOGGING_LEVEL)
-        self.arp_table = {}
+        interfaces: dict[str, Node] = {}
+        handler = FrameHandlerClass(
+            lambda _, f: f.protocol != IPProtocol.ARP, self.forward
+        )
 
         # Create interface sockets
-        self.interfaces = {}
-        for name in ["R1", "R2", "R3"]:
-            port = wires[config[name]["wire"]]
-            sock = socket.create_connection((HOSTNAME, port))
-            self.interfaces[name] = {
-                "socket": sock,
-                "MAC": config[name]["MAC"],
-                "IP": config[name]["IP"],
-            }
-            self.logger.info(f"{name} connected to wire")
+        for k, v in config["interfaces"].items():
+            wire_conf = wires[v["wire"]]
+            n = (
+                Node(v, wire_conf)
+                .add_handler(ARPRequestHandler())
+                .add_handler(ARPResponseHandler())
+                .add_handler(PingRequestHandler())
+                .add_handler(handler)
+            )
+            self.logger.info(f"{k} connected to wire")
+            interfaces[k] = n
+
+            # Start listener threads
+            Thread(target=n.rcv_MAC_frame, daemon=True).start()
 
         # Fixed routing table (IP → interface name)
         self.routing_table = {
-            0x12: "R1",
-            0x13: "R1",
-            0x22: "R2",
-            0x32: "R3",
+            k: interfaces[v] for k, v in config["routing_table"].items()
         }
 
-        # Start listener threads
-        for name in self.interfaces:
-            Thread(target=self.listen, args=(name,), daemon=True).start()
-
-    def listen(self, iface_name):
-        sock = self.interfaces[iface_name]["socket"]
-        iface_mac = self.interfaces[iface_name]["MAC"]
-        iface_ip = self.interfaces[iface_name]["IP"]
-
-        while True:
-            data = sock.recv(RECEIVE_SIZE)
-            frame = MACFrame.from_bytes(data)
-
-            # Accept frames sent to this interface OR broadcast
-            if frame.destination not in [iface_mac, "\xff\xff"]:
-                continue
-
-            try:
-                ip_frame = IPFrame.from_bytes(frame.data)
-            except:
-                continue
-
-
-            if ip_frame.protocol.name == "ARP":
-                self.arp_table[ip_frame.source] = frame.source
-                if ip_frame.destination == iface_ip and ip_frame.data == b"req":
-
-                    reply = IPFrame(
-                        iface_ip,
-                        ip_frame.source,
-                        ip_frame.protocol,
-                        b"res",
-                    )
-
-                    response = MACFrame(
-                        iface_mac,
-                        frame.source,
-                        bytes(reply),
-                    )
-
-                    sock.send(bytes(response))
-                    self.logger.info(f"{iface_name} replied to ARP")
-
-                continue
-
-            # ------------------------
-            # Normal IP forwarding
-            # ------------------------
-            self.logger.info(f"{iface_name} received IP packet")
-            self.forward(bytes(ip_frame))
-
-    def forward(self, ip_bytes: bytes):
-
-        ip_frame = IPFrame.from_bytes(ip_bytes)
-        dst_ip: IPaddr = ip_frame.destination
+    def forward(self, _n: Node, ip_frame: IPFrame, _mac: MACaddr) -> bool:
+        dst_ip = ip_frame.destination
 
         if dst_ip not in self.routing_table:
             self.logger.warning(f"No route for 0x{dst_ip:02x}")
-            return
+            return False
 
-        out_iface_name = self.routing_table[dst_ip]
-        out_iface = self.interfaces[out_iface_name]
-
-        dst_mac = self.resolve_mac(dst_ip)
-
-        new_mac_frame = MACFrame(
-            out_iface["MAC"],
-            dst_mac,
-            bytes(ip_frame)
-        )
-
-        out_iface["socket"].send(bytes(new_mac_frame))
-
-        self.logger.info(
-            f"Forwarded packet to 0x{dst_ip:02x} via {out_iface_name}"
-        )
-
-    def resolve_mac(self, ip: IPaddr) -> MACaddr:
-        if ip in self.arp_table:
-            return self.arp_table[ip]
-
-        # If not known yet, send ARP request out correct interface
-        out_iface_name = self.routing_table[ip]
-        out_iface = self.interfaces[out_iface_name]
-
-        arp_request = IPFrame(
-            out_iface["IP"],
-            ip,
-            IPProtocol.ARP,
-            b"req",
-        )
-
-        broadcast = MACFrame(
-            out_iface["MAC"],
-            "\xff\xff",
-            bytes(arp_request),
-        )
-
-        out_iface["socket"].send(bytes(broadcast))
-
-        # wait until learned
-        while ip not in self.arp_table:
-            pass
-
-        return self.arp_table[ip]
+        n = self.routing_table[dst_ip]
+        n.send_MAC_frame(n.resolve_IP(dst_ip), bytes(ip_frame))
+        self.logger.info(f"Forwarded packet to 0x{dst_ip:02x} via {n.Mac}")
+        return True
