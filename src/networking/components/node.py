@@ -105,6 +105,7 @@ class Node:
             self._logger.warning(
                 f"Firewall dropped packet from 0x{ip_frame.source:02x} to 0x{ip_frame.destination:02x} "
             )
+            return
 
         self._logger.info(
             f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{
