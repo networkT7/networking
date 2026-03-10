@@ -1,7 +1,6 @@
 from threading import Thread
 from logging import Logger
 
-from networking.collections.ts_dict import TSDict
 from networking.components.handlers import (
     ARPRequestHandler,
     ARPResponseHandler,
@@ -11,12 +10,11 @@ from networking.components.node import FrameHandlerClass, Node
 from networking.config import LOGGING_LEVEL
 from networking.frames import IPFrame
 from networking.log_format import create_logger
-from networking.types import IPaddr, MACaddr, IPProtocol, RouterConfig, WireConfig
+from networking.types import MACaddr, IPProtocol, RouterConfig, WireConfig
 
 
 class Router:
-    arp_table: TSDict[IPaddr, MACaddr] = TSDict()
-    logger: Logger = create_logger("ROUTER", level=LOGGING_LEVEL)
+    logger: Logger = create_logger(__name__, level=LOGGING_LEVEL)
     routing_table: dict[int, Node]
 
     def __init__(self, config: RouterConfig, wires: dict[str, WireConfig]):
@@ -27,8 +25,7 @@ class Router:
 
         interfaces: dict[str, Node] = {}
         handler = FrameHandlerClass(
-            lambda n, f: f.protocol != IPProtocol.ARP,
-            self.forward,
+            lambda _, f: f.protocol != IPProtocol.ARP, self.forward
         )
 
         # Create interface sockets

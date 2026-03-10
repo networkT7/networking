@@ -70,7 +70,7 @@ class MACFrame:
     @property
     def destination(self) -> MACaddr:
         """
-        Returns the encapsulated data
+        Returns the destination of the frame
         """
         return self.__dst
 
@@ -152,14 +152,14 @@ class IPFrame:
     @property
     def destination(self) -> IPaddr:
         """
-        Returns the encapsulated data
+        Returns the destination of the frame
         """
         return self.__dst
 
     @property
     def protocol(self) -> IPProtocol:
         """
-        Returns the encapsulated data
+        Returns the protocol used for the IP packet
         """
         return self.__protocol
 
@@ -170,7 +170,7 @@ class IPFrame:
         assert protocol in IPProtocol, "not a valid protocol"
 
         length = len(data)
-        assert length <= 252, "data is too large for frame"
+        assert length <= 256, "data is too large for frame"
 
         self.__src = src
         self.__dst = dst
