@@ -2,12 +2,14 @@ from logging import Logger
 import socket
 from threading import Thread
 from typing import Callable, override
-
+from random import randint
+from threading import Event
 from networking.firewall import Firewall, FirewallRule, FirewallAction
 from networking.collections.ts_dict import TSDict
-from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
+from networking.config import HOSTNAME, LOGGING_LEVEL
 from networking.constants import BYTE_ENCODING_TYPE, BROADCAST_MAC
 from networking.frames import MACFrame, IPFrame, DeserializationException
+from networking.components.wire import send_framed, recv_framed
 from networking.log_format import create_logger
 from networking.types import (
     MACaddr,
@@ -85,16 +87,26 @@ class Node:
     subnet: IPaddr
     subnet_mask: IPaddr
     _logger: Logger
-    _socket: socket.SocketType
+    _socket: socket.socket
     sniffing: bool
     ip_mapping: TSDict[IPaddr, MACaddr]
     ip_handlers: list[FrameHandlerClass]
 
     # receiving
-    def rcv_MAC_frame(self) -> MACFrame:
+    def rcv_MAC_frame(self) -> None:
         while True:
-            data = self._socket.recv(RECEIVE_SIZE)
-            frame = MACFrame.from_bytes(data)
+            try:
+                data = recv_framed(self._socket)
+                if not data:                          # socket closed gracefully
+                    self._logger.warning("Socket closed, stopping receiver.")
+                    return
+                frame = MACFrame.from_bytes(data)
+            except DeserializationException as e:
+                self._logger.warning(f"Dropping malformed frame: {e}")
+                continue                              # skip bad frame, keep looping
+            except OSError as e:
+                self._logger.warning(f"Socket error: {e}")
+                return
 
             match frame:
                 case MACFrame(src, dst, _, bites) if dst in (
@@ -149,12 +161,27 @@ class Node:
         self.ip_handlers.append(handler_class)
         return self
 
+    def ddos(self, target_ip: IPaddr, count: int = 200):
+        self._logger.warning(f"[DDOS] Starting DDoS on 0x{target_ip:02x}")
+        self._ddos_stop = Event()
+        sent = 0
+        while not self._ddos_stop.is_set() and sent < count:
+            fake_src = randint(0x01, 0xFE)        # random spoofed source IP
+            self.send_spoofed_IP_frame(
+                fake_src,
+                target_ip,
+                IPProtocol.DATA,
+                b"flood",
+            )
+            sent += 1
+        self._logger.warning(f"[DDOS] Finished — sent {sent} packets to 0x{target_ip:02x}")
+        
     # sending
     def send_MAC_frame(self, dst: MACaddr, data: bytes):
         self._logger.info(
             f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
         )
-        self._socket.sendall(bytes(MACFrame(self.Mac, dst, data)))
+        send_framed(self._socket, bytes(MACFrame(self.Mac, dst, data)))
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
         self._logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
@@ -245,6 +272,16 @@ class Node:
                         self._logger.warning(f"[MITM] Intercept handler installed for victim 0x{victim_ip:02x}")
                     else:
                         print("[MITM] Handler already active.")
+                case ["DDOS", target_ip_hex]:
+                    target_ip = int(target_ip_hex, base=16)
+                    Thread(target=self.ddos, args=(target_ip,), daemon=True).start()
+
+                case ["DDOS", "STOP"]:
+                    if self._ddos_stop is not None:
+                        self._ddos_stop.set()
+                        print("[DDOS] Stopping attack...")
+                    else:
+                        print("[DDOS] No active DDoS attack.")
                 # Firewall commands
                 case ["FW", "ADD", action_str, src_ip_hex] if self.firewall is not None:
                     try:
@@ -303,6 +340,7 @@ class Node:
         self.sniffing = False
         self.ip_mapping = TSDict()
         self.ip_handlers = []
+        self._ddos_stop: Event | None = None  
         self._logger.info("connected to wire")
 
         if node_config.get("firewall", False):
@@ -313,7 +351,18 @@ class Node:
         else:
             self.firewall = None
 
-        Thread(target=self.rcv_MAC_frame, daemon=True).start()
+        self._start_receiver()  
+
+    def _start_receiver(self):
+        def watched():
+            try:
+                self.rcv_MAC_frame()
+            except Exception as e:
+                self._logger.error(f"Receiver thread crashed: {e}")
+            finally:
+                self._logger.warning("Receiver thread exited.")
+
+        Thread(target=watched, daemon=True).start()
 
     def __del__(self):
         self._socket.close()

@@ -41,9 +41,6 @@ class Router:
             self.logger.info(f"{k} connected to wire")
             interfaces[k] = n
 
-            # Start listener threads
-            Thread(target=n.rcv_MAC_frame, daemon=True).start()
-
         # Fixed routing table (IP → interface name)
         self.routing_table = {
             k: interfaces[v] for k, v in config["routing_table"].items()
