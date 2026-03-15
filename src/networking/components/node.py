@@ -51,6 +51,33 @@ FW LIST
 FW DEFAULT ACCEPT|DROP
 """
 
+class MITMHandler(FrameHandlerClass):
+    """
+    Intercepts packets destined for `router_ip` that were sent by `victim_ip`,
+    logs them, then forwards them to the real router.
+    """
+    victim_ip: IPaddr
+    router_ip: IPaddr
+
+    def __init__(self, victim_ip: IPaddr, router_ip: IPaddr):
+        self.victim_ip = victim_ip
+        self.router_ip = router_ip
+
+        def predicate(node: "Node", ip_frame: IPFrame) -> bool:
+            # Only intercept frames originating from the victim
+            return ip_frame.source == victim_ip
+
+        def handler(node: "Node", ip_frame: IPFrame, src_mac: MACaddr) -> bool:
+            node._logger.warning(
+                f"[MITM] Intercepted packet: "
+                f"src=0x{ip_frame.source:02x} dst=0x{ip_frame.destination:02x} "
+                f"proto={IPProtocol(ip_frame.protocol).name} data={ip_frame.data}"
+            )
+            # Forward the original frame onwards to the real destination
+            node.send_IP_frame(ip_frame.destination, IPProtocol(ip_frame.protocol), ip_frame.data)
+            return True  # stop handler chain — we've dealt with it
+
+        super().__init__(predicate, handler)
 
 class Node:
     Mac: MACaddr
@@ -197,6 +224,27 @@ class Node:
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
                     self.sniffing = True if mode.lower() == "on" else False
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
+                case ["MITM", victim_ip_hex, router_ip_hex]:
+                    victim_ip = int(victim_ip_hex, base=16)
+                    router_ip = int(router_ip_hex, base=16)
+
+                    # Poison the victim's ARP cache:
+                    # Tell the victim that router_ip is at *our* MAC address
+                    self.send_ARP_response(
+                        self.resolve_IP(victim_ip),   # send to victim's MAC
+                        router_ip,                    # "I am the owner of router_ip"
+                    )
+                    self._logger.warning(
+                        f"[MITM] ARP poison sent to 0x{victim_ip:02x} — "
+                        f"claiming router 0x{router_ip:02x} is at {self.Mac}"
+                    )
+
+                    # Install the intercept+forward handler if not already present
+                    if not any(isinstance(h, MITMHandler) for h in self.ip_handlers):
+                        self.add_handler(MITMHandler(victim_ip, router_ip))
+                        self._logger.warning(f"[MITM] Intercept handler installed for victim 0x{victim_ip:02x}")
+                    else:
+                        print("[MITM] Handler already active.")
                 # Firewall commands
                 case ["FW", "ADD", action_str, src_ip_hex] if self.firewall is not None:
                     try:
