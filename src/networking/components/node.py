@@ -201,6 +201,7 @@ class Node:
 
     # address resolution
     def save_IP_mapping(self, ip: IPaddr, mac: MACaddr):
+        self._logger.debug(f"IP {ip:02x} saved as MAC {mac}")
         self.ip_mapping[ip] = mac
 
     def send_ARP_request(self, dst: IPaddr):
