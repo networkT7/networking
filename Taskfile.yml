@@ -6,22 +6,20 @@ version: "3"
 tasks:
   venv:
     status:
-      - "test -d venv"
+      - "test -d .venv"
     cmds:
-      - python -m venv venv
-    silent: false
+      - uv venv --seed
   install:
     sources:
-      - requirements.txt
+      - pyproject.toml
     status:
-      - '[ "$(venv/Scripts/pip freeze)" -eq "$(cat requirements.txt)" ]'
+      - '[ -n "$(.venv/Scripts/pip freeze)" ]'
     deps:
       - venv
     cmds:
-      - venv/Scripts/pip install -r requirements.txt
-    silent: false
+      - uv sync
   default:
     deps:
       - install
     cmds:
-      - venv/Scripts/python src/main.py {{.CLI_ARGS}}
+      - uv run src/main.py {{.CLI_ARGS}}
