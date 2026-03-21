@@ -47,8 +47,15 @@ match argv:
         c = config["nodes"][node_name]
         wire = config["wires"][c["wire"]]
 
+        from networking.ids import IDS
+        from networking.log_format import create_logger
+        from networking.config import LOGGING_LEVEL
+        ids = IDS(create_logger(f"IDS-{node_name}", level=LOGGING_LEVEL))
+        ids.seed(c["IP"], c["MAC"])
+
         (
             Node(c, wire)
+            .add_handler(ids.handler)
             .add_handler(ARPRequestHandler())
             .add_handler(ARPResponseHandler())
             .add_handler(PingRequestHandler())
@@ -56,6 +63,8 @@ match argv:
             .add_handler(DataHandler())
             .input()
         )
+
+
 
     case [_, "router"]:
         Router(config["routers"], config["wires"])

@@ -180,20 +180,25 @@ class Node:
             data = input("> ")
             match data.split():
                 case ["SEND", dst, *msg]:
-                    self.send_IP_frame(
+                    Thread(target=self.send_IP_frame, args=(
                         int(dst, base=16),
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
-                    )
+                    ), daemon=True).start()
+
                 case ["PING", dst]:
-                    self.send_IP_frame(int(dst, base=16), IPProtocol.PING, b"req")
+                    Thread(target=self.send_IP_frame, args=(
+                        int(dst, base=16), IPProtocol.PING, b"req",
+                    ), daemon=True).start()
+
                 case ["SPOOF", fake_src, dst, *msg]:
-                    self.send_spoofed_IP_frame(
+                    Thread(target=self.send_spoofed_IP_frame, args=(
                         int(fake_src, base=16),
                         int(dst, base=16),
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
-                    )
+                    ), daemon=True).start()
+
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
                     self.sniffing = True if mode.lower() == "on" else False
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
@@ -254,6 +259,7 @@ class Node:
         self._socket = socket.create_connection((HOSTNAME, wire_config["port"]))
         self.sniffing = False
         self.ip_mapping = TSDict()
+        self.ip_mapping[self.Ip] = self.Mac
         self.ip_handlers = []
         self._logger.info("connected to wire")
 
@@ -266,6 +272,8 @@ class Node:
             self.firewall = None
 
         Thread(target=self.rcv_MAC_frame, daemon=True).start()
+        Thread(target=lambda: self.send_ARP_request(self.Ip), daemon=True).start()
+
 
     def __del__(self):
         self._socket.close()
