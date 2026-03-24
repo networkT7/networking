@@ -207,23 +207,31 @@ class Node:
         self.ip_handlers.append(handler_class)
         return self
 
-    def ddos(self, target_ip: IPaddr, count: int = 200):
+    def ddos(self, target_ip: IPaddr):
         self._logger.warning(f"[DDOS] Starting DDoS on 0x{target_ip:02x}")
+
         if self._ddos_stop is None:
             self._ddos_stop = Event()
         else:
             self._ddos_stop.clear()
-        sent = 0
-        while not self._ddos_stop.is_set() and sent < count:
-            fake_src = randint(0x01, 0xFE)        # random spoofed source IP
+
+        import time
+
+        while True:
+            if self._ddos_stop.is_set():
+                self._logger.warning("[DDOS] Stopped.")
+                break
+
+            fake_src = randint(0x01, 0xFE)
+
             self.send_spoofed_IP_frame(
                 fake_src,
                 target_ip,
                 IPProtocol.DATA,
                 b"flood",
             )
-            sent += 1
-        self._logger.warning(f"[DDOS] Finished — sent {sent} packets to 0x{target_ip:02x}")
+
+            time.sleep(0.01)  # 🔥 controls speed (don’t remove)
         
     # sending
     def send_MAC_frame(self, dst: MACaddr, data: bytes):
