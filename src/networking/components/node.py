@@ -348,7 +348,14 @@ class Node:
                 case ["DDOS", target_ip_hex]:
                     target_ip = int(target_ip_hex, base=16)
                     Thread(target=self.ddos, args=(target_ip,), daemon=True).start()
-
+                case ["ARP"]:
+                    print("\n=== ARP TABLE ===")
+                    for ip, mac in dict(self.ip_mapping).items():
+                        label = ""
+                        if ip == self.Ip:
+                            label = "(self)"
+                        print(f"IP 0x{ip:02x} -> MAC {mac} {label}")
+                    print("=================\n")
                 # Firewall commands
                 case ["FW", "ADD", action_str, src_ip_hex] if self.firewall is not None:
                     try:
