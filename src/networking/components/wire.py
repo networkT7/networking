@@ -13,35 +13,6 @@ logger = create_logger(__name__)
 # Used by both Wire and Node so TCP coalescing never merges frames.
 # ---------------------------------------------------------------------------
 
-def send_framed(sock: socket.socket, data: bytes) -> None:
-    """Prepend a 2-byte length header and send atomically."""
-    sock.sendall(len(data).to_bytes(2, "big") + data)
-
-
-def recv_framed(sock: socket.socket) -> bytes:
-    """
-    Read exactly one framed message.
-    The socket must have NO timeout (blocking) — Wire sets this automatically.
-    Returns b"" when the connection is closed.
-    """
-    header = _recv_exact(sock, 2)
-    if not header:
-        return b""
-    length = int.from_bytes(header, "big")
-    return _recv_exact(sock, length)
-
-
-def _recv_exact(sock: socket.socket, n: int) -> bytes:
-    """Read exactly n bytes, looping across multiple recv() calls."""
-    buf = bytearray()
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
-            return b""
-        buf.extend(chunk)
-    return bytes(buf)
-
-
 class Wire:
     __server: socket.socket
     __targets: list[socket.socket]
@@ -56,7 +27,7 @@ class Wire:
             if sock is sender:
                 continue
             try:
-                send_framed(sock, msg)
+                sock.sendall(msg)
             except OSError as e:
                 logger.warning(f"broadcast send failed: {e}")
 
@@ -69,7 +40,7 @@ class Wire:
         conn.settimeout(None)           # must be blocking for recv_framed
         try:
             while True:
-                msg = recv_framed(conn)
+                msg = conn.recv(RECEIVE_SIZE)
                 if not msg:
                     logger.info("connection closed by peer")
                     break

@@ -9,7 +9,6 @@ from networking.collections.ts_dict import TSDict
 from networking.config import HOSTNAME, LOGGING_LEVEL
 from networking.constants import BYTE_ENCODING_TYPE, BROADCAST_MAC
 from networking.frames import MACFrame, IPFrame, DeserializationException
-from networking.components.wire import send_framed, recv_framed
 from networking.log_format import create_logger
 from networking.types import (
     MACaddr,
@@ -67,7 +66,10 @@ class MITMHandler(FrameHandlerClass):
 
         def predicate(node: "Node", ip_frame: IPFrame) -> bool:
             # Only intercept frames originating from the victim
-            return ip_frame.source == victim_ip
+            return (
+                ip_frame.source == victim_ip
+                and ip_frame.destination == router_ip
+            )
 
         def handler(node: "Node", ip_frame: IPFrame, src_mac: MACaddr) -> bool:
             node._logger.warning(
@@ -76,7 +78,8 @@ class MITMHandler(FrameHandlerClass):
                 f"proto={IPProtocol(ip_frame.protocol).name} data={ip_frame.data}"
             )
             # Forward the original frame onwards to the real destination
-            node.send_IP_frame(ip_frame.destination, IPProtocol(ip_frame.protocol), ip_frame.data)
+            real_mac = node.resolve_IP(ip_frame.destination)
+            node.send_MAC_frame(real_mac,bytes(ip_frame))
             return True  # stop handler chain — we've dealt with it
 
         super().__init__(predicate, handler)
@@ -94,43 +97,59 @@ class Node:
 
     # receiving
     def rcv_MAC_frame(self) -> None:
+        buffer = b""
+
         while True:
             try:
-                data = recv_framed(self._socket)
-                if not data:                          # socket closed gracefully
+                chunk = self._socket.recv(1024)
+                if not chunk:
                     self._logger.warning("Socket closed, stopping receiver.")
                     return
-                frame = MACFrame.from_bytes(data)
-            except DeserializationException as e:
-                self._logger.warning(f"Dropping malformed frame: {e}")
-                continue                              # skip bad frame, keep looping
+
+                buffer += chunk
+
+                while len(buffer) >= 5:
+                    length = buffer[4]
+                    total_len = 5 + length
+
+                    if len(buffer) < total_len:
+                        break
+
+                    frame_bytes = buffer[:total_len]
+                    buffer = buffer[total_len:]
+
+                    try:
+                        frame = MACFrame.from_bytes(frame_bytes)
+                    except DeserializationException as e:
+                        self._logger.warning(f"Dropping malformed frame: {e}")
+                        continue
+
+                    match frame:
+                        case MACFrame(src, dst, _, bites) if dst in (
+                            self.Mac,
+                            BROADCAST_MAC,
+                        ):
+                            self._logger.info(
+                                f"receiving [MAC] src={src} dst={dst} len={len(bites)} data={bites.hex()}"
+                            )
+                            self.rcv_IP_frame(bites, src)
+
+                        case MACFrame(src, dst, _, data) if self.sniffing:
+                            try:
+                                ip = IPFrame.from_bytes(frame.data)
+                                self._logger.warning(
+                                    f"[SNIFF] src={src} dst={dst} | "
+                                    + f"IP src=0x{ip.source:02x} dst=0x{ip.destination:02x} "
+                                    + f"proto={ip.protocol.name} data={ip.data}"
+                                )
+                            except DeserializationException:
+                                self._logger.warning(
+                                    f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
+                                )
+
             except OSError as e:
                 self._logger.warning(f"Socket error: {e}")
                 return
-
-            match frame:
-                case MACFrame(src, dst, _, bites) if dst in (
-                    self.Mac,
-                    BROADCAST_MAC,
-                ):
-                    self._logger.info(
-                        f"receiving [MAC] src={src} dst={dst} len={len(bites)} data={bites.hex()}"
-                    )
-                    self.rcv_IP_frame(bites, src)
-                case MACFrame(src, dst, _, data) if self.sniffing:
-                    try:
-                        ip = IPFrame.from_bytes(frame.data)
-                        self._logger.warning(
-                            f"[SNIFF] src={src} dst={dst} | "
-                            + f"IP src=0x{ip.source:02x} dst=0x{ip.destination:02x} "
-                            + f"proto={ip.protocol.name} data={ip.data}"
-                        )
-                    except DeserializationException:
-                        self._logger.warning(
-                            f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
-                        )
-                case _:
-                    pass
 
     def rcv_IP_frame(self, byte_arr: bytes, src_mac: MACaddr):
         try:
@@ -163,7 +182,10 @@ class Node:
 
     def ddos(self, target_ip: IPaddr, count: int = 200):
         self._logger.warning(f"[DDOS] Starting DDoS on 0x{target_ip:02x}")
-        self._ddos_stop = Event()
+        if self._ddos_stop is None:
+            self._ddos_stop = Event()
+        else:
+            self._ddos_stop.clear()
         sent = 0
         while not self._ddos_stop.is_set() and sent < count:
             fake_src = randint(0x01, 0xFE)        # random spoofed source IP
@@ -181,7 +203,7 @@ class Node:
         self._logger.info(
             f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
         )
-        send_framed(self._socket, bytes(MACFrame(self.Mac, dst, data)))
+        self._socket.sendall(bytes(MACFrame(self.Mac, dst, data)))
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
         self._logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
@@ -262,6 +284,11 @@ class Node:
                         self.resolve_IP(victim_ip),   # send to victim's MAC
                         router_ip,                    # "I am the owner of router_ip"
                     )
+                    # ALSO poison router
+                    self.send_ARP_response(
+                        self.resolve_IP(router_ip),
+                        victim_ip
+                    )
                     self._logger.warning(
                         f"[MITM] ARP poison sent to 0x{victim_ip:02x} — "
                         f"claiming router 0x{router_ip:02x} is at {self.Mac}"
@@ -278,7 +305,7 @@ class Node:
                     Thread(target=self.ddos, args=(target_ip,), daemon=True).start()
 
                 case ["DDOS", "STOP"]:
-                    if self._ddos_stop is not None:
+                    if self._ddos_stop is not None and not self._ddos_stop.is_set():
                         self._ddos_stop.set()
                         print("[DDOS] Stopping attack...")
                     else:
