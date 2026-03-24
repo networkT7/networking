@@ -180,24 +180,24 @@ class Node:
             data = input("> ")
             match data.split():
                 case ["SEND", dst, *msg]:
-                    Thread(target=self.send_IP_frame, args=(
+                    self.send_IP_frame( 
                         int(dst, base=16),
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
-                    ), daemon=True).start()
+                    )
 
                 case ["PING", dst]:
-                    Thread(target=self.send_IP_frame, args=(
-                        int(dst, base=16), IPProtocol.PING, b"req",
-                    ), daemon=True).start()
+                    self.send_IP_frame(  
+                        int(dst, base=16), IPProtocol.PING, b"req"
+                    )
 
                 case ["SPOOF", fake_src, dst, *msg]:
-                    Thread(target=self.send_spoofed_IP_frame, args=(
+                    self.send_spoofed_IP_frame( 
                         int(fake_src, base=16),
                         int(dst, base=16),
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
-                    ), daemon=True).start()
+                    )
 
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
                     self.sniffing = True if mode.lower() == "on" else False
@@ -245,6 +245,13 @@ class Node:
                         print("       FW REMOVE <rule_index>")
                         print("       FW LIST")
                         print("       FW DEFAULT <accept|drop>")
+
+                # to remove
+                case ["THREADS"]:
+                    import threading
+                    for t in threading.enumerate():
+                        print(f"  [{t.ident}] {t.name} | daemon={t.daemon} | alive={t.is_alive()}")
+                    print(f"  TOTAL: {threading.active_count()}")
 
                 case _:
                     print(HELP)

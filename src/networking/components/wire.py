@@ -13,22 +13,32 @@ class Wire:
     __targets: SimpleQueue[socket.SocketType]
 
     def _broadcast(self, msg: bytes):
-        logger.info(f"sending {msg} to {self.__targets.qsize()} targets")
-        for _ in range(self.__targets.qsize()):
-            sock = self.__targets.get()
-            sock.send(msg)
-            self.__targets.put(sock)
+        targets = []
+        while not self.__targets.empty():
+            targets.append(self.__targets.get_nowait())
+        
+        logger.info(f"sending {msg} to {len(targets)} targets")
+        for sock in targets:
+            try:
+                sock.send(msg)
+                self.__targets.put(sock) 
+            except (BrokenPipeError, OSError):
+                logger.warning("dropping dead connection") 
 
     def forward(self):
         while True:
             sock = self.__targets.get()
             try:
                 msg = sock.recv(RECEIVE_SIZE)
-                self._broadcast(msg)
+                if msg:
+                    self.__targets.put(sock)
+                    self._broadcast(msg)
+                else:
+                    logger.warning("connection closed, removing socket")
             except TimeoutError:
-                pass
-            finally:
                 self.__targets.put(sock)
+            except (BrokenPipeError, OSError):
+                logger.warning("dropping dead connection in forward")
 
     def accept(self):
         while True:
