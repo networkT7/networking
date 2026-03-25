@@ -6,7 +6,7 @@ from random import randint
 from threading import Event
 from networking.firewall import Firewall, FirewallRule, FirewallAction
 from networking.collections.ts_dict import TSDict
-from networking.config import HOSTNAME, LOGGING_LEVEL
+from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
 from networking.constants import BYTE_ENCODING_TYPE, BROADCAST_MAC
 from networking.frames import MACFrame, IPFrame, DeserializationException
 from networking.log_format import create_logger
@@ -52,11 +52,13 @@ FW LIST
 FW DEFAULT ACCEPT|DROP
 """
 
+
 class MITMHandler(FrameHandlerClass):
     """
     Intercepts packets destined for `router_ip` that were sent by `victim_ip`,
     logs them, then forwards them to the real router.
     """
+
     victim_ip: IPaddr
     router_ip: IPaddr
 
@@ -75,16 +77,18 @@ class MITMHandler(FrameHandlerClass):
             )
             # Forward the original frame onwards to the real destination
             real_mac = node.resolve_IP(ip_frame.destination)
-            node.send_MAC_frame(real_mac,bytes(ip_frame))
+            node.send_MAC_frame(real_mac, bytes(ip_frame))
             return True  # stop handler chain — we've dealt with it
 
         super().__init__(predicate, handler)
 
+
 class MITMARPInterceptHandler(FrameHandlerClass):
     """
-    When sniffed: if victim sends ARP req for router, 
+    When sniffed: if victim sends ARP req for router,
     N2 responds immediately so victim never hears from real router.
     """
+
     def __init__(self, victim_ip: IPaddr, router_ip: IPaddr):
         def predicate(node: "Node", f: IPFrame) -> bool:
             return (
@@ -104,6 +108,7 @@ class MITMARPInterceptHandler(FrameHandlerClass):
 
         super().__init__(predicate, handler)
 
+
 class Node:
     Mac: MACaddr
     Ip: IPaddr
@@ -117,66 +122,40 @@ class Node:
 
     # receiving
     def rcv_MAC_frame(self) -> None:
-        buffer = b""
-
         while True:
             try:
-                chunk = self._socket.recv(1024)
-                if not chunk:
+                data = self._socket.recv(RECEIVE_SIZE)
+                if not data:
                     self._logger.warning("Socket closed, stopping receiver.")
                     return
+                frame = MACFrame.from_bytes(data)
 
-                buffer += chunk
-
-                while len(buffer) >= 5:
-                    length = buffer[4]
-                    total_len = 5 + length
-
-                    if len(buffer) < total_len:
-                        break
-
-                    frame_bytes = buffer[:total_len]
-                    buffer = buffer[total_len:]
-
-                    try:
-                        frame = MACFrame.from_bytes(frame_bytes)
-                    except DeserializationException as e:
-                        self._logger.warning(f"Dropping malformed frame: {e}")
-                        continue
-
-                    match frame:
-                        case MACFrame(src, dst, _, bites) if dst in (self.Mac, BROADCAST_MAC):
-                            self._logger.info(
-                                f"receiving [MAC] src={src} dst={dst} len={len(bites)} data={bites.hex()}"
-                            )
-                            self.rcv_IP_frame(bites, src)
-
-                            # ADD THIS: if sniffing, also run handlers on broadcast frames
-                            # (lets MITMARPInterceptHandler catch victim ARP reqs sent to broadcast)
-                            if self.sniffing and dst == BROADCAST_MAC:
-                                try:
-                                    ip = IPFrame.from_bytes(bites)
-                                    for handler in self.ip_handlers:
-                                        if handler.try_handle(self, ip, src):
-                                            break
-                                except DeserializationException:
-                                    pass
-
-                        case MACFrame(src, dst, _, data) if self.sniffing:
-                            try:
-                                ip = IPFrame.from_bytes(frame.data)
-                                self._logger.warning(f"[SNIFF] ...")
-                                for handler in self.ip_handlers:
-                                    if handler.try_handle(self, ip, src):
-                                        break
-                            except DeserializationException:
-                                self._logger.warning(
-                                    f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
-                                )
+            except DeserializationException as e:
+                self._logger.warning(f"Dropping malformed frame: {e}")
+                continue
 
             except OSError as e:
                 self._logger.warning(f"Socket error: {e}")
                 return
+
+            match frame:
+                case MACFrame(src, dst, _, bites) if dst in (self.Mac, BROADCAST_MAC):
+                    self._logger.info(
+                        f"receiving [MAC] src={src} dst={dst} len={len(bites)} data={bites.hex()}"
+                    )
+                    self.rcv_IP_frame(bites, src)
+
+                case MACFrame(src, dst, _, data) if self.sniffing:
+                    try:
+                        ip = IPFrame.from_bytes(frame.data)
+                        self._logger.warning("[SNIFF] ...")
+                        for handler in self.ip_handlers:
+                            if handler.try_handle(self, ip, src):
+                                break
+                    except DeserializationException:
+                        self._logger.warning(
+                            f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
+                        )
 
     def rcv_IP_frame(self, byte_arr: bytes, src_mac: MACaddr):
         try:
@@ -232,7 +211,7 @@ class Node:
             )
 
             time.sleep(0.01)  # 🔥 controls speed (don’t remove)
-        
+
     # sending
     def send_MAC_frame(self, dst: MACaddr, data: bytes):
         self._logger.info(
@@ -323,26 +302,35 @@ class Node:
                     self.sniffing = True  # you already have sniff infra — repurpose it
 
                     # Install ARP intercept handler (catches victim's ARP reqs off the wire)
-                    if not any(isinstance(h, MITMARPInterceptHandler) for h in self.ip_handlers):
-                        _ = self.add_handler(MITMARPInterceptHandler(victim_ip, router_ip))
+                    if not any(
+                        isinstance(h, MITMARPInterceptHandler) for h in self.ip_handlers
+                    ):
+                        _ = self.add_handler(
+                            MITMARPInterceptHandler(victim_ip, router_ip)
+                        )
 
                     # Install data intercept handler
                     if not any(isinstance(h, MITMHandler) for h in self.ip_handlers):
                         _ = self.add_handler(MITMHandler(victim_ip, router_ip))
-                        self._logger.warning(f"[MITM] Handlers installed for victim 0x{victim_ip:02x}")
+                        self._logger.warning(
+                            f"[MITM] Handlers installed for victim 0x{victim_ip:02x}"
+                        )
                     else:
                         print("[MITM] Handler already active.")
 
                     # Continuous poison loop as before
                     def poison_loop():
                         import time
+
                         while getattr(self, "_mitm_active", False):
                             self.send_ARP_response(victim_mac, router_ip, victim_ip)
                             self.send_ARP_response(router_mac, victim_ip, router_ip)
                             time.sleep(0.5)
 
                     Thread(target=poison_loop, daemon=True).start()
-                    self._logger.warning(f"[MITM] Attack started against 0x{victim_ip:02x}")
+                    self._logger.warning(
+                        f"[MITM] Attack started against 0x{victim_ip:02x}"
+                    )
                 case ["MITM", "STOP"]:
                     self._mitm_active = False
                     print("[MITM] Poison loop stopped.")
@@ -422,7 +410,7 @@ class Node:
         self.sniffing = False
         self.ip_mapping = TSDict()
         self.ip_handlers = []
-        self._ddos_stop: Event | None = None  
+        self._ddos_stop: Event | None = None
         self._logger.info("connected to wire")
 
         if node_config.get("firewall", False):
@@ -433,7 +421,7 @@ class Node:
         else:
             self.firewall = None
 
-        self._start_receiver()  
+        self._start_receiver()
 
     def _start_receiver(self):
         def watched():
@@ -449,3 +437,4 @@ class Node:
     def __del__(self):
         self._socket.close()
         self._logger.debug("closing node")
+
