@@ -1,6 +1,6 @@
 from queue import SimpleQueue
 import socket
-from threading import Thread
+from threading import Thread, Lock
 
 from networking.config import HOSTNAME, RECEIVE_SIZE, SOCKET_TIMEOUT
 from networking.log_format import create_logger
@@ -8,54 +8,71 @@ from networking.log_format import create_logger
 logger = create_logger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Framing helpers — 2-byte big-endian length prefix on every frame.
+# Used by both Wire and Node so TCP coalescing never merges frames.
+# ---------------------------------------------------------------------------
+
 class Wire:
     __server: socket.socket
-    __targets: SimpleQueue[socket.SocketType]
+    __targets: list[socket.socket]
+    __lock: Lock                        # guards __targets during broadcast
 
-    def _broadcast(self, msg: bytes):
-        targets = []
-        while not self.__targets.empty():
-            targets.append(self.__targets.get_nowait())
-        
-        logger.info(f"sending {msg} to {len(targets)} targets")
+    def _broadcast(self, msg: bytes, sender: socket.socket):
+        """Send msg to every connected socket except the sender."""
+        with self.__lock:
+            targets = list(self.__targets)
+        logger.info(f"broadcasting {len(msg)} bytes to {len(targets) - 1} peer(s)")
         for sock in targets:
+            if sock is sender:
+                continue
             try:
-                sock.send(msg)
-                self.__targets.put(sock) 
-            except (BrokenPipeError, OSError):
-                logger.warning("dropping dead connection") 
+                sock.sendall(msg)
+            except OSError as e:
+                logger.warning(f"broadcast send failed: {e}")
 
-    def forward(self):
-        while True:
-            sock = self.__targets.get()
-            try:
-                msg = sock.recv(RECEIVE_SIZE)
-                if msg:
-                    self.__targets.put(sock)
-                    self._broadcast(msg)
-                else:
-                    logger.warning("connection closed, removing socket")
-            except TimeoutError:
-                self.__targets.put(sock)
-            except (BrokenPipeError, OSError):
-                logger.warning("dropping dead connection in forward")
+    def _handle(self, conn: socket.socket):
+        """
+        Dedicated blocking receive loop for one connected node.
+        No timeout — blocks until a full frame arrives.
+        One thread per connection means frames are never interleaved.
+        """
+        conn.settimeout(None)           # must be blocking for recv_framed
+        try:
+            while True:
+                msg = conn.recv(RECEIVE_SIZE)
+                if not msg:
+                    logger.info("connection closed by peer")
+                    break
+                logger.debug(f"[WIRE RECV] {len(msg)} bytes: {msg.hex()}")
+                self._broadcast(msg, sender=conn)
+        except OSError as e:
+            logger.warning(f"connection error: {e}")
+        finally:
+            with self.__lock:
+                if conn in self.__targets:
+                    self.__targets.remove(conn)
+            conn.close()
 
     def accept(self):
         while True:
             try:
                 conn = self.__server.accept()[0]
-                conn.settimeout(SOCKET_TIMEOUT)
-                self.__targets.put(conn)
+                logger.info("new connection accepted")
+                with self.__lock:
+                    self.__targets.append(conn)
+                Thread(target=self._handle, args=(conn,), daemon=True).start()
             except TimeoutError:
                 pass
 
     def __init__(self, port: int):
-        self.__targets = SimpleQueue()
-        Thread(target=self.forward, daemon=True).start()
+        self.__targets = []
+        self.__lock = Lock()
         self.__server = socket.create_server((HOSTNAME, port))
         self.__server.settimeout(SOCKET_TIMEOUT)
 
     def __del__(self):
         logger.debug("closing sockets")
-        while not self.__targets.empty():
-            self.__targets.get_nowait().close()
+        with self.__lock:
+            for sock in self.__targets:
+                sock.close()

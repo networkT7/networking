@@ -20,7 +20,7 @@ class ARPRequestHandler(FrameHandlerClass):
         src = frame.source
         node._logger.debug(f"ARP request received from 0x{src:02x}")
         node.save_IP_mapping(src, src_mac)
-        node.send_ARP_response(src_mac, src)
+        node.send_ARP_response(src_mac, node.Ip, src)
         return True
 
 
@@ -41,7 +41,6 @@ class ARPResponseHandler(FrameHandlerClass):
         node._logger.debug(f"ARP response received from 0x{src:02x}")
         node.save_IP_mapping(src, src_mac)
         return True
-
 
 class PingRequestHandler(FrameHandlerClass):
     def __init__(self):
