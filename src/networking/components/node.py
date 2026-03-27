@@ -273,20 +273,25 @@ class Node:
             data = input("> ")
             match data.split():
                 case ["SEND", dst, *msg]:
-                    self.send_IP_frame(
+                    self.send_IP_frame( 
                         int(dst, base=16),
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
                     )
+
                 case ["PING", dst]:
-                    self.send_IP_frame(int(dst, base=16), IPProtocol.PING, b"req")
+                    self.send_IP_frame(  
+                        int(dst, base=16), IPProtocol.PING, b"req"
+                    )
+
                 case ["SPOOF", fake_src, dst, *msg]:
-                    self.send_spoofed_IP_frame(
+                    self.send_spoofed_IP_frame( 
                         int(fake_src, base=16),
                         int(dst, base=16),
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
                     )
+
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
                     self.sniffing = True if mode.lower() == "on" else False
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
@@ -396,6 +401,13 @@ class Node:
                         print("       FW LIST")
                         print("       FW DEFAULT <accept|drop>")
 
+                # to remove
+                case ["THREADS"]:
+                    import threading
+                    for t in threading.enumerate():
+                        print(f"  [{t.ident}] {t.name} | daemon={t.daemon} | alive={t.is_alive()}")
+                    print(f"  TOTAL: {threading.active_count()}")
+
                 case _:
                     print(HELP)
 
@@ -409,6 +421,7 @@ class Node:
         self._socket = socket.create_connection((HOSTNAME, wire_config["port"]))
         self.sniffing = False
         self.ip_mapping = TSDict()
+        self.ip_mapping[self.Ip] = self.Mac
         self.ip_handlers = []
         self._ddos_stop: Event | None = None
         self._logger.info("connected to wire")
@@ -422,6 +435,7 @@ class Node:
             self.firewall = None
 
         self._start_receiver()
+        Thread(target=lambda: self.send_ARP_request(self.Ip), daemon=True).start()
 
     def _start_receiver(self):
         def watched():
