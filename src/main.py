@@ -6,6 +6,8 @@ from networking.components.handlers import (
     DataHandler,
     PingRequestHandler,
     PingResponseHandler,
+    TCPConnectionHandler,
+    TCPConnectResponseHandler,  # ← [CONNECT]
 )
 from networking.config import config
 from networking.components.node import Node
@@ -60,11 +62,11 @@ match argv:
             .add_handler(ARPResponseHandler())
             .add_handler(PingRequestHandler())
             .add_handler(PingResponseHandler())
+            .add_handler(TCPConnectResponseHandler())  # ← [CONNECT] before TCPConnectionHandler so SYN-ACK/RST are caught first
+            .add_handler(TCPConnectionHandler())
             .add_handler(DataHandler())
             .input()
         )
-
-
 
     case [_, "router"]:
         Router(config["routers"], config["wires"])

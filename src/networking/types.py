@@ -9,6 +9,7 @@ class IPProtocol(IntEnum):
     DATA = 0
     PING = 1
     ARP = 2
+    TCP = 3
 
 
 class MetaConf(TypedDict):
