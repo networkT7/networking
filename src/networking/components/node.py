@@ -203,8 +203,10 @@ class Node:
         else:
             self._ddos_stop.clear()
 
+        total_sent = 0
         while True:
             if self._ddos_stop.is_set():
+                print(f"\r[DDOS] Stopped. Total packets sent: {total_sent:<8}", flush=True)
                 self._logger.warning("[DDOS] Stopped.")
                 break
 
@@ -217,6 +219,8 @@ class Node:
                 b"flood",
             )
 
+            total_sent += 1
+            print(f"\r[DDOS] Flooding 0x{target_ip:02x} | pkts: {total_sent:<6} | src: 0x{fake_src:02x} (random)", end="", flush=True)
             time.sleep(0.01)  # controls speed (don’t remove)
 
     def _cleanup_stale_connections(self):
@@ -315,14 +319,13 @@ class Node:
             total_sent += 1
             idx += 1
 
-            if total_sent % 500 == 0:
-                self._logger.warning(
-                    f"[RDDOS] Stats: {total_sent} packets sent, "
-                    f"current source: 0x{spoofed_ip:02x}"
-                )
+            bar_filled = (idx % len(pool))
+            bar = "#" * bar_filled + "." * (len(pool) - bar_filled)
+            print(f"\r[RDDOS] [{bar}] pkts: {total_sent:<6} | src: 0x{spoofed_ip:02x} | ~200 pps", end="", flush=True)
 
             time.sleep(0.005)
 
+        print(f"\r[RDDOS] Stopped. Total packets sent: {total_sent:<8}", flush=True)
         self._logger.warning(f"[RDDOS] Stopped. Total packets sent: {total_sent}")
 
     # sending
