@@ -271,9 +271,9 @@ class Node:
 
     # sending
     def send_MAC_frame(self, dst: MACaddr, data: bytes):
-        # self._logger.info(
-        #     f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
-        # )
+        self._logger.info(
+            f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
+        )
         self._socket.sendall(bytes(MACFrame(self.Mac, dst, data)))
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
