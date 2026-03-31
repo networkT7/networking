@@ -102,9 +102,11 @@ class MITMHandler(FrameHandlerClass):
                 print("  [1] Forward unchanged")
                 print("  [2] Modify message")
                 print("  [3] Drop packet")
+                print("\n⚠️  Press ENTER before typing your choice", flush=True)
                 choice = input("Select option: ").strip()
 
                 if choice == "2":
+                    print("\n⚠️  Press ENTER before typing modified message", flush=True)
                     new_msg = input("Enter modified message: ")
                     modified = new_msg.encode("utf-8")
 
@@ -269,9 +271,9 @@ class Node:
 
     # sending
     def send_MAC_frame(self, dst: MACaddr, data: bytes):
-        self._logger.info(
-            f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
-        )
+        # self._logger.info(
+        #     f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
+        # )
         self._socket.sendall(bytes(MACFrame(self.Mac, dst, data)))
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
@@ -379,8 +381,8 @@ class Node:
                     self._last_victim_ip = victim_ip
                     self._last_router_ip = router_ip
 
-                    victim_mac = self.ip_mapping.get(victim_ip)
-                    router_mac = self.ip_mapping.get(router_ip)
+                    victim_mac = self.resolve_IP(victim_ip)
+                    router_mac = self.resolve_IP(router_ip)
 
                     self.sniffing = True
 
