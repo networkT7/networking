@@ -1,5 +1,5 @@
 from logging import Logger
-import socket
+import socket, time
 from threading import Thread
 from typing import Callable, override
 from random import randint
@@ -55,8 +55,8 @@ FW DEFAULT ACCEPT|DROP
 
 class MITMHandler(FrameHandlerClass):
     """
-    Intercepts packets destined for `router_ip` that were sent by `victim_ip`,
-    logs them, then forwards them to the real router.
+    Intercepts packets from victim ONLY when MITM is active,
+    logs them, then forwards them to the real destination.
     """
 
     victim_ip: IPaddr
@@ -67,21 +67,76 @@ class MITMHandler(FrameHandlerClass):
         self.router_ip = router_ip
 
         def predicate(node: "Node", ip_frame: IPFrame) -> bool:
+
+            if not getattr(node, "_mitm_active", False):
+                return False
+
             return ip_frame.source == victim_ip
 
         def handler(node: "Node", ip_frame: IPFrame, src_mac: MACaddr) -> bool:
+
+            if not getattr(node, "_mitm_active", False):
+                return False
+
+            original_data = ip_frame.data
+
             node._logger.warning(
                 f"[MITM] Intercepted packet: "
                 f"src=0x{ip_frame.source:02x} dst=0x{ip_frame.destination:02x} "
-                f"proto={IPProtocol(ip_frame.protocol).name} data={ip_frame.data}"
+                f"proto={IPProtocol(ip_frame.protocol).name} data={original_data}"
             )
-            # Forward the original frame onwards to the real destination
+
+            # =========================
+            # 🔥 ACTIVE MODE (USER INPUT)
+            # =========================
+            if getattr(node, "_mitm_mode", "passive") == "active":
+
+                try:
+                    decoded = original_data.decode("utf-8")
+                except:
+                    decoded = str(original_data)
+
+                print("\n=== MITM INTERCEPT ===")
+                print(f"Original message: {decoded}")
+                print("Options:")
+                print("  [1] Forward unchanged")
+                print("  [2] Modify message")
+                print("  [3] Drop packet")
+                choice = input("Select option: ").strip()
+
+                if choice == "2":
+                    new_msg = input("Enter modified message: ")
+                    modified = new_msg.encode("utf-8")
+
+                elif choice == "3":
+                    print("[MITM] Packet dropped.")
+                    return True
+
+                else:
+                    modified = original_data
+
+            else:
+                # =========================
+                # 💤 PASSIVE MODE
+                # =========================
+                modified = original_data
+
+            # 🔥 Build new frame
+            new_frame = IPFrame(
+                ip_frame.source,
+                ip_frame.destination,
+                ip_frame.protocol,
+                modified
+            )
+
             real_mac = node.resolve_IP(ip_frame.destination)
-            node.send_MAC_frame(real_mac, bytes(ip_frame))
-            return True  # stop handler chain — we've dealt with it
+            node.send_MAC_frame(real_mac, bytes(new_frame))
+
+            node._logger.warning(f"[MITM] Forwarded → {modified}")
+
+            return True
 
         super().__init__(predicate, handler)
-
 
 class MITMARPInterceptHandler(FrameHandlerClass):
     """
@@ -295,51 +350,57 @@ class Node:
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
                     self.sniffing = True if mode.lower() == "on" else False
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
+                
+                
+                case ["MITM", "STOP"]:
+                    self._mitm_active = False
+                    self.sniffing = False 
+                    self.ip_handlers = [
+                        h for h in self.ip_handlers
+                        if h.__class__.__name__ not in ["MITMHandler", "MITMARPInterceptHandler"]
+                    ]
+
+                case ["MITM", "MODE", mode]:
+                    if mode.lower() in ["active", "passive"]:
+                        self._mitm_mode = mode.lower()
+                        print(f"[MITM] Mode set to {self._mitm_mode.upper()}")
+                    else:
+                        print("Usage: MITM MODE active|passive")
+
                 case ["MITM", victim_ip_hex, router_ip_hex]:
                     victim_ip = int(victim_ip_hex, base=16)
                     router_ip = int(router_ip_hex, base=16)
+
+                    self.resolve_IP(victim_ip)
+                    self.resolve_IP(router_ip)
+
                     self._mitm_active = True
 
-                    victim_mac = self.resolve_IP(victim_ip)
-                    router_mac = self.resolve_IP(router_ip)
+                    self._last_victim_ip = victim_ip
+                    self._last_router_ip = router_ip
 
-                    # Enable sniffing so we see ALL frames, not just ones addressed to us
-                    self.sniffing = True  # you already have sniff infra — repurpose it
+                    victim_mac = self.ip_mapping.get(victim_ip)
+                    router_mac = self.ip_mapping.get(router_ip)
 
-                    # Install ARP intercept handler (catches victim's ARP reqs off the wire)
-                    if not any(
-                        isinstance(h, MITMARPInterceptHandler) for h in self.ip_handlers
-                    ):
-                        _ = self.add_handler(
-                            MITMARPInterceptHandler(victim_ip, router_ip)
-                        )
+                    self.sniffing = True
 
-                    # Install data intercept handler
-                    if not any(isinstance(h, MITMHandler) for h in self.ip_handlers):
-                        _ = self.add_handler(MITMHandler(victim_ip, router_ip))
-                        self._logger.warning(
-                            f"[MITM] Handlers installed for victim 0x{victim_ip:02x}"
-                        )
-                    else:
-                        print("[MITM] Handler already active.")
+                    if not any(h.__class__.__name__ == "MITMARPInterceptHandler" for h in self.ip_handlers):
+                        self.add_handler(MITMARPInterceptHandler(victim_ip, router_ip))
 
-                    # Continuous poison loop as before
+                    if not any(h.__class__.__name__ == "MITMHandler" for h in self.ip_handlers):
+                        self.add_handler(MITMHandler(victim_ip, router_ip))
+
                     def poison_loop():
-                        import time
-
                         while getattr(self, "_mitm_active", False):
                             self.send_ARP_response(victim_mac, router_ip, victim_ip)
                             self.send_ARP_response(router_mac, victim_ip, router_ip)
-                            time.sleep(0.5)
+                            time.sleep(2)
 
                     Thread(target=poison_loop, daemon=True).start()
-                    self._logger.warning(
-                        f"[MITM] Attack started against 0x{victim_ip:02x}"
-                    )
-                case ["MITM", "STOP"]:
-                    self._mitm_active = False
-                    print("[MITM] Poison loop stopped.")
 
+                    self._logger.warning(f"[MITM] Attack started against 0x{victim_ip:02x}")
+                
+                        
                 case ["DDOS", "STOP"]:
                     if self._ddos_stop is not None and not self._ddos_stop.is_set():
                         self._ddos_stop.set()
@@ -424,6 +485,8 @@ class Node:
         self.ip_mapping[self.Ip] = self.Mac
         self.ip_handlers = []
         self._ddos_stop: Event | None = None
+        self._mitm_mode = "passive"
+        self._mitm_active = False 
         self._logger.info("connected to wire")
 
         if node_config.get("firewall", False):

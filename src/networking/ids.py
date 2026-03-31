@@ -42,6 +42,8 @@ class IDS:
         # Track which src_ips we've already blocked to avoid duplicate rules
         self._blocked: set[IPaddr] = set()
         self._blocked_lock = Lock()
+        self._spoof_counts: dict[IPaddr, int] = defaultdict(int)
+        self._spoof_lock = Lock()
 
         self.handler = FrameHandlerClass(
             lambda _node, _frame: True,
@@ -115,15 +117,18 @@ class IDS:
                 return
 
             if known_mac != src_mac:
-                self._logger.critical(
-                    f"[IDS] ⚠ ARP SPOOF / MITM DETECTED on node {node.Mac}: "
-                    f"IP 0x{src_ip:02x} was at MAC '{known_mac}', "
-                    f"now claiming to be at MAC '{src_mac}' — possible MITM!"
-                )
-                # Update so we don't spam the same alert repeatedly
-                self._arp_table[src_ip] = src_mac
-                self._block(node, src_ip, reason="ARP spoof")
+                with self._spoof_lock:
+                    self._spoof_counts[src_ip] += 1
+                    count = self._spoof_counts[src_ip]
 
+                if count == 1 or count % 5 == 0:
+                    self._logger.critical(
+                        f"[IDS] ⚠ ARP SPOOF / MITM DETECTED on node {node.Mac}: "
+                        f"IP 0x{src_ip:02x} was at MAC '{known_mac}', "
+                        f"now claiming to be at MAC '{src_mac}' — possible MITM!"
+                        + (f" (x{count})" if count > 1 else "")
+                    )
+                self._block(node, src_ip, reason="ARP spoof")
     # ------------------------------------------------------------------
     # Detection: IP Spoofing (DATA / PING frames)
     # ------------------------------------------------------------------
