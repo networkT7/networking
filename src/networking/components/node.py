@@ -1,7 +1,7 @@
 from logging import Logger
 import socket, time
 from threading import Thread
-from typing import Callable, override
+from typing import Callable, TypedDict, Unpack, override
 from random import randint
 from threading import Event
 from networking.firewall import Firewall, FirewallRule, FirewallAction
@@ -146,7 +146,15 @@ class MITMARPInterceptHandler(FrameHandlerClass):
     N2 responds immediately so victim never hears from real router.
     """
 
-    def __init__(self, victim_ip: IPaddr, router_ip: IPaddr):
+    node: Node
+    victim_ip: IPaddr
+    router_ip: IPaddr
+
+    def __init__(self, node: Node, victim_ip: IPaddr, router_ip: IPaddr):
+        self.victim_ip = victim_ip
+        self.router_ip = router_ip
+        self.node = node
+
         def predicate(node: "Node", f: IPFrame) -> bool:
             return (
                 f.protocol == IPProtocol.ARP
@@ -164,6 +172,29 @@ class MITMARPInterceptHandler(FrameHandlerClass):
             return True
 
         super().__init__(predicate, handler)
+
+    def __del__(self):
+        self.node._logger.warning("Removing ARP intercept handler")
+        victim_mac = self.node.resolve_IP(self.victim_ip)
+        router_mac = self.node.resolve_IP(self.router_ip)
+        self.node.send_spoofed_IP_frame(
+            self.victim_ip,
+            self.router_ip,
+            IPProtocol.ARP,
+            b"req",
+            spoofed_mac=victim_mac,
+        )
+        self.node.send_spoofed_IP_frame(
+            self.router_ip,
+            self.victim_ip,
+            IPProtocol.ARP,
+            b"req",
+            spoofed_mac=router_mac,
+        )
+
+
+class SendMACKWargs(TypedDict, total=False):
+    spoofed_mac: MACaddr | None
 
 
 class Node:
@@ -270,26 +301,33 @@ class Node:
             time.sleep(0.01)  # 🔥 controls speed (don’t remove)
 
     # sending
-    def send_MAC_frame(self, dst: MACaddr, data: bytes):
+    def send_MAC_frame(
+        self, dst: MACaddr, data: bytes, **kwargs: Unpack[SendMACKWargs]
+    ):
+        spoofed_mac = kwargs.get("spoofed_mac") or self.Mac
         self._logger.info(
-            f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
+            f"sending [MAC] src={spoofed_mac} dst={dst} len={len(data)} data={data.hex()}"
         )
-        self._socket.sendall(bytes(MACFrame(self.Mac, dst, data)))
+        self._socket.sendall(bytes(MACFrame(spoofed_mac, dst, data)))
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
         self._logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
         self.send_spoofed_IP_frame(self.Ip, dst, protocol, data)
 
     def send_spoofed_IP_frame(
-        self, spoof_src: IPaddr, dst: IPaddr, protocol: IPProtocol, data: bytes
+        self,
+        spoof_src: IPaddr,
+        dst: IPaddr,
+        protocol: IPProtocol,
+        data: bytes,
+        **kwargs: Unpack[SendMACKWargs],
     ):
         if self.Ip != spoof_src:
             self._logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
         resolved_mac = self.resolve_IP(dst)
 
         self.send_MAC_frame(
-            resolved_mac,
-            bytes(IPFrame(spoof_src, dst, protocol, data)),
+            resolved_mac, bytes(IPFrame(spoof_src, dst, protocol, data)), **kwargs
         )
 
     # address resolution
@@ -373,13 +411,7 @@ class Node:
                     victim_ip = int(victim_ip_hex, base=16)
                     router_ip = int(router_ip_hex, base=16)
 
-                    self.resolve_IP(victim_ip)
-                    self.resolve_IP(router_ip)
-
                     self._mitm_active = True
-
-                    self._last_victim_ip = victim_ip
-                    self._last_router_ip = router_ip
 
                     victim_mac = self.resolve_IP(victim_ip)
                     router_mac = self.resolve_IP(router_ip)
