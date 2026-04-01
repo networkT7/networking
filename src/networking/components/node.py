@@ -181,14 +181,14 @@ class MITMARPInterceptHandler(FrameHandlerClass):
             self.victim_ip,
             self.router_ip,
             IPProtocol.ARP,
-            b"req",
+            b"res",
             spoofed_mac=victim_mac,
         )
         self.node.send_spoofed_IP_frame(
             self.router_ip,
             self.victim_ip,
             IPProtocol.ARP,
-            b"req",
+            b"res",
             spoofed_mac=router_mac,
         )
 
@@ -419,7 +419,9 @@ class Node:
                     self.sniffing = True
 
                     if not any(h.__class__.__name__ == "MITMARPInterceptHandler" for h in self.ip_handlers):
-                        self.add_handler(MITMARPInterceptHandler(victim_ip, router_ip))
+                        self.add_handler(
+                            MITMARPInterceptHandler(self, victim_ip, router_ip)
+                        )
 
                     if not any(h.__class__.__name__ == "MITMHandler" for h in self.ip_handlers):
                         self.add_handler(MITMHandler(victim_ip, router_ip))
