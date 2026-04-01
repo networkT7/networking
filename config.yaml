@@ -3,7 +3,7 @@
 config:
   HOSTNAME: 127.0.0.1
   LOGGING_LEVEL: DEBUG
-  RECEIVE_SIZE: 1000
+  RECEIVE_SIZE: 261
   SOCKET_TIMEOUT: 1
 
 nodes:
@@ -22,7 +22,7 @@ nodes:
     IP: 0x22
     wire: W2
     firewall: true
-    
+
   N4:
     MAC: N4
     IP: 0x32

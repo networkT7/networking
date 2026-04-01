@@ -1,6 +1,6 @@
 from logging import Logger
 import socket, time
-from threading import Thread
+from threading import Thread, Lock
 from typing import Callable, TypedDict, Unpack, override
 from random import randint
 from threading import Event
@@ -43,9 +43,16 @@ class FrameHandlerClass:
 HELP = """
 SEND <IP> <message>
 PING <IP>
+CONNECT <IP>           - attempt TCP connection, shows ACCEPTED or REFUSED  ← [CONNECT]
 SPOOF <spoofed IP> <IP> <message>
 SNIFF on|off
-FW
+DDOS <IP>              - volumetric flood with random source IPs
+DDOS STOP
+SLOWLORIS <IP>         - low-and-slow connection exhaustion
+SLOWLORIS STOP
+RDDOS <IP>             - rotating source distributed flood
+RDDOS STOP
+STATS                  - show connection table & active attacks
 FW ADD ACCEPT|DROP <IP>
 FW REMOVE <rule_id>
 FW LIST
@@ -90,7 +97,6 @@ class MITMHandler(FrameHandlerClass):
             # 🔥 ACTIVE MODE (USER INPUT)
             # =========================
             if getattr(node, "_mitm_mode", "passive") == "active":
-
                 try:
                     decoded = original_data.decode("utf-8")
                 except:
@@ -125,10 +131,7 @@ class MITMHandler(FrameHandlerClass):
 
             # 🔥 Build new frame
             new_frame = IPFrame(
-                ip_frame.source,
-                ip_frame.destination,
-                ip_frame.protocol,
-                modified
+                ip_frame.source, ip_frame.destination, ip_frame.protocol, modified
             )
 
             real_mac = node.resolve_IP(ip_frame.destination)
@@ -139,6 +142,7 @@ class MITMHandler(FrameHandlerClass):
             return True
 
         super().__init__(predicate, handler)
+
 
 class MITMARPInterceptHandler(FrameHandlerClass):
     """
@@ -282,10 +286,12 @@ class Node:
         else:
             self._ddos_stop.clear()
 
-        import time
-
+        total_sent = 0
         while True:
             if self._ddos_stop.is_set():
+                print(
+                    f"\r[DDOS] Stopped. Total packets sent: {total_sent:<8}", flush=True
+                )
                 self._logger.warning("[DDOS] Stopped.")
                 break
 
@@ -298,7 +304,117 @@ class Node:
                 b"flood",
             )
 
-            time.sleep(0.01)  # 🔥 controls speed (don’t remove)
+            total_sent += 1
+            print(
+                f"\r[DDOS] Flooding 0x{target_ip:02x} | pkts: {total_sent:<6} | src: 0x{fake_src:02x} (random)",
+                end="",
+                flush=True,
+            )
+            time.sleep(0.01)  # controls speed (don’t remove)
+
+    def _cleanup_stale_connections(self):
+        """Remove connections that have timed out. Must be called with _conn_lock held."""
+        now = time.monotonic()
+        stale = [
+            ip
+            for ip, info in self._conn_table.items()
+            if now - info["last_activity"] > self._conn_timeout
+        ]
+        for ip in stale:
+            del self._conn_table[ip]
+            self._logger.debug(f"[TCP] Connection from 0x{ip:02x} timed out")
+
+    def slowloris(self, target_ip: IPaddr):
+        self._logger.warning(f"[SLOWLORIS] Starting Slowloris on 0x{target_ip:02x}")
+
+        if self._slowloris_stop is None:
+            self._slowloris_stop = Event()
+        else:
+            self._slowloris_stop.clear()
+
+        # Phase 1: Open connections with spoofed IPs
+        # 12 IPs > max_connections (10), so last 2 get dropped — demonstrates exhaustion
+        # Pool is offset by node IP so concurrent attackers don't share spoofed IPs
+        # (shared IPs trigger the router's DAI and get dropped)
+        base = (self.Ip & 0x0F) * 12
+        pool = [(0x80 + base + i) & 0xFF for i in range(12)]  # 12 spoofed source IPs
+        self._logger.warning(f"[SLOWLORIS] Phase 1: Opening {len(pool)} connections...")
+
+        for i, spoofed_ip in enumerate(pool):
+            if self._slowloris_stop.is_set():
+                self._logger.warning("[SLOWLORIS] Stopped during Phase 1.")
+                return
+
+            self.send_spoofed_IP_frame(spoofed_ip, target_ip, IPProtocol.TCP, b"SYN")
+            self._logger.warning(f"[SLOWLORIS] Phase 1: SYN sent ({i + 1}/{len(pool)})")
+            time.sleep(0.2)
+
+        # Phase 2: Hold connections open with keepalives
+        # Cycle must complete within _conn_timeout (10s).
+        # 12 IPs x 0.5s = 6s per cycle — safely under 10s timeout.
+        keepalive_sleep = 0.5
+        cycle_time = len(pool) * keepalive_sleep
+        self._logger.warning(
+            f"[SLOWLORIS] Phase 2: Holding connections, "
+            f"cycle every {cycle_time:.0f}s, ~{1 / keepalive_sleep:.0f} pps"
+        )
+
+        cycle_count = 0
+        while not self._slowloris_stop.is_set():
+            for spoofed_ip in pool:
+                if self._slowloris_stop.is_set():
+                    break
+                self.send_spoofed_IP_frame(
+                    spoofed_ip, target_ip, IPProtocol.TCP, b"KEEPALIVE"
+                )
+                time.sleep(keepalive_sleep)
+
+            cycle_count += 1
+            self._logger.warning(
+                f"[SLOWLORIS] Status: keepalive cycle {cycle_count} complete "
+                f"({len(pool)} connections maintained)"
+            )
+
+        self._logger.warning("[SLOWLORIS] Stopped.")
+
+    def rddos(self, target_ip: IPaddr):
+        self._logger.warning(
+            f"[RDDOS] Starting rotating source DDoS on 0x{target_ip:02x}"
+        )
+
+        if self._rddos_stop is None:
+            self._rddos_stop = Event()
+        else:
+            self._rddos_stop.clear()
+
+        pool = list(range(0xC0, 0xD4))  # 20 spoofed source IPs
+        self._logger.warning(
+            f"[RDDOS] Using {len(pool)} rotating sources, "
+            f"~{1000 / 5:.0f} pps aggregate, "
+            f"~{1000 / (5 * len(pool)):.0f} pps per source"
+        )
+
+        total_sent = 0
+        idx = 0
+
+        while not self._rddos_stop.is_set():
+            spoofed_ip = pool[idx % len(pool)]
+            self.send_spoofed_IP_frame(spoofed_ip, target_ip, IPProtocol.DATA, b"flood")
+            total_sent += 1
+            idx += 1
+
+            bar_filled = idx % len(pool)
+            bar = "#" * bar_filled + "." * (len(pool) - bar_filled)
+            print(
+                f"\r[RDDOS] [{bar}] pkts: {total_sent:<6} | src: 0x{spoofed_ip:02x} | ~200 pps",
+                end="",
+                flush=True,
+            )
+
+            time.sleep(0.005)
+
+        print(f"\r[RDDOS] Stopped. Total packets sent: {total_sent:<8}", flush=True)
+        self._logger.warning(f"[RDDOS] Stopped. Total packets sent: {total_sent}")
 
     # sending
     def send_MAC_frame(
@@ -368,19 +484,23 @@ class Node:
             data = input("> ")
             match data.split():
                 case ["SEND", dst, *msg]:
-                    self.send_IP_frame( 
+                    self.send_IP_frame(
                         int(dst, base=16),
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
                     )
 
                 case ["PING", dst]:
-                    self.send_IP_frame(  
-                        int(dst, base=16), IPProtocol.PING, b"req"
-                    )
+                    self.send_IP_frame(int(dst, base=16), IPProtocol.PING, b"req")
+
+                case [
+                    "CONNECT",
+                    dst,
+                ]:  # ← [CONNECT] sends SYN; reply logged by TCPConnectResponseHandler
+                    self.send_IP_frame(int(dst, base=16), IPProtocol.TCP, b"SYN")
 
                 case ["SPOOF", fake_src, dst, *msg]:
-                    self.send_spoofed_IP_frame( 
+                    self.send_spoofed_IP_frame(
                         int(fake_src, base=16),
                         int(dst, base=16),
                         IPProtocol.DATA,
@@ -390,14 +510,15 @@ class Node:
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
                     self.sniffing = True if mode.lower() == "on" else False
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
-                
-                
+
                 case ["MITM", "STOP"]:
                     self._mitm_active = False
-                    self.sniffing = False 
+                    self.sniffing = False
                     self.ip_handlers = [
-                        h for h in self.ip_handlers
-                        if h.__class__.__name__ not in ["MITMHandler", "MITMARPInterceptHandler"]
+                        h
+                        for h in self.ip_handlers
+                        if h.__class__.__name__
+                        not in ["MITMHandler", "MITMARPInterceptHandler"]
                     ]
 
                 case ["MITM", "MODE", mode]:
@@ -418,12 +539,17 @@ class Node:
 
                     self.sniffing = True
 
-                    if not any(h.__class__.__name__ == "MITMARPInterceptHandler" for h in self.ip_handlers):
+                    if not any(
+                        h.__class__.__name__ == "MITMARPInterceptHandler"
+                        for h in self.ip_handlers
+                    ):
                         self.add_handler(
                             MITMARPInterceptHandler(self, victim_ip, router_ip)
                         )
 
-                    if not any(h.__class__.__name__ == "MITMHandler" for h in self.ip_handlers):
+                    if not any(
+                        h.__class__.__name__ == "MITMHandler" for h in self.ip_handlers
+                    ):
                         self.add_handler(MITMHandler(victim_ip, router_ip))
 
                     def poison_loop():
@@ -434,9 +560,10 @@ class Node:
 
                     Thread(target=poison_loop, daemon=True).start()
 
-                    self._logger.warning(f"[MITM] Attack started against 0x{victim_ip:02x}")
-                
-                        
+                    self._logger.warning(
+                        f"[MITM] Attack started against 0x{victim_ip:02x}"
+                    )
+
                 case ["DDOS", "STOP"]:
                     if self._ddos_stop is not None and not self._ddos_stop.is_set():
                         self._ddos_stop.set()
@@ -446,6 +573,68 @@ class Node:
                 case ["DDOS", target_ip_hex]:
                     target_ip = int(target_ip_hex, base=16)
                     Thread(target=self.ddos, args=(target_ip,), daemon=True).start()
+
+                case ["SLOWLORIS", "STOP"]:
+                    if (
+                        self._slowloris_stop is not None
+                        and not self._slowloris_stop.is_set()
+                    ):
+                        self._slowloris_stop.set()
+                        print("[SLOWLORIS] Stopping attack...")
+                    else:
+                        print("[SLOWLORIS] No active Slowloris attack.")
+                case ["SLOWLORIS", target_ip_hex]:
+                    target_ip = int(target_ip_hex, base=16)
+                    Thread(
+                        target=self.slowloris, args=(target_ip,), daemon=True
+                    ).start()
+
+                case ["RDDOS", "STOP"]:
+                    if self._rddos_stop is not None and not self._rddos_stop.is_set():
+                        self._rddos_stop.set()
+                        print("[RDDOS] Stopping attack...")
+                    else:
+                        print("[RDDOS] No active rotating DDoS attack.")
+                case ["RDDOS", target_ip_hex]:
+                    target_ip = int(target_ip_hex, base=16)
+                    Thread(target=self.rddos, args=(target_ip,), daemon=True).start()
+
+                case ["STATS"]:
+                    print("\n=== TRAFFIC STATS ===")
+                    with self._conn_lock:
+                        self._cleanup_stale_connections()
+                        total = len(self._conn_table)
+                        half_open = sum(
+                            1
+                            for v in self._conn_table.values()
+                            if v["state"] == "HALF_OPEN"
+                        )
+                        established = total - half_open
+                        print(
+                            f"Connections: {total}/{self._max_connections} used "
+                            f"({half_open} HALF_OPEN, {established} ESTABLISHED)"
+                        )
+                        now = time.monotonic()
+                        for ip, info in self._conn_table.items():
+                            age = now - info["last_activity"]
+                            print(
+                                f"  0x{ip:02x}: {info['state']}  (last activity: {age:.1f}s ago)"
+                            )
+                    attacks = []
+                    if self._ddos_stop is not None and not self._ddos_stop.is_set():
+                        attacks.append("DDOS")
+                    if (
+                        self._slowloris_stop is not None
+                        and not self._slowloris_stop.is_set()
+                    ):
+                        attacks.append("SLOWLORIS")
+                    if self._rddos_stop is not None and not self._rddos_stop.is_set():
+                        attacks.append("RDDOS")
+                    print(
+                        f"Active attacks: {', '.join(attacks) if attacks else 'none'}"
+                    )
+                    print("====================\n")
+
                 case ["ARP"]:
                     print("\n=== ARP TABLE ===")
                     for ip, mac in dict(self.ip_mapping).items():
@@ -501,8 +690,11 @@ class Node:
                 # to remove
                 case ["THREADS"]:
                     import threading
+
                     for t in threading.enumerate():
-                        print(f"  [{t.ident}] {t.name} | daemon={t.daemon} | alive={t.is_alive()}")
+                        print(
+                            f"  [{t.ident}] {t.name} | daemon={t.daemon} | alive={t.is_alive()}"
+                        )
                     print(f"  TOTAL: {threading.active_count()}")
 
                 case _:
@@ -522,7 +714,16 @@ class Node:
         self.ip_handlers = []
         self._ddos_stop: Event | None = None
         self._mitm_mode = "passive"
-        self._mitm_active = False 
+        self._mitm_active = False
+        self._slowloris_stop: Event | None = None
+        self._rddos_stop: Event | None = None
+
+        # Connection tracking (target for Slowloris)
+        self._conn_table: dict[int, dict] = {}
+        self._conn_lock = Lock()
+        self._max_connections = 10
+        self._conn_timeout = 10.0
+
         self._logger.info("connected to wire")
 
         if node_config.get("firewall", False):
@@ -550,4 +751,3 @@ class Node:
     def __del__(self):
         self._socket.close()
         self._logger.debug("closing node")
-

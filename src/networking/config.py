@@ -1,8 +1,11 @@
+from pathlib import Path
 from yaml import load, Loader
 
 from networking.types import Config
 
-with open("config.yaml") as f:
+_config_path = Path(__file__).resolve().parent.parent.parent / "config.yaml"
+
+with open(_config_path) as f:
     global config
     config: Config = load(f.read(), Loader)
 
