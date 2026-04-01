@@ -1,4 +1,3 @@
-from queue import SimpleQueue
 import socket
 from threading import Thread, Lock
 
@@ -7,11 +6,6 @@ from networking.log_format import create_logger
 
 logger = create_logger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Framing helpers — 2-byte big-endian length prefix on every frame.
-# Used by both Wire and Node so TCP coalescing never merges frames.
-# ---------------------------------------------------------------------------
 
 class Wire:
     __server: socket.socket

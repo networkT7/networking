@@ -16,7 +16,7 @@ from networking.types import MACaddr, IPProtocol, RouterConfig, WireConfig
 
 # --- Tunable thresholds (mirror ids.py) ---
 RATE_WINDOW = 2.0       # seconds
-RATE_THRESHOLD = 50     # packets per window from a single src_ip
+RATE_THRESHOLD = 15     # packets per window from a single src_ip
 
 
 class Router:
@@ -100,6 +100,10 @@ class Router:
             return False
 
         n = self.routing_table[dst_ip]
-        n.send_MAC_frame(n.resolve_IP(dst_ip), bytes(ip_frame))
+        try:
+            n.send_MAC_frame(n.resolve_IP(dst_ip), bytes(ip_frame))
+        except TimeoutError:
+            self.logger.warning(f"ARP timeout resolving 0x{dst_ip:02x} — dropping packet")
+            return False
         self.logger.info(f"Forwarded packet to 0x{dst_ip:02x} via {n.Mac}")
         return True

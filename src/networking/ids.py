@@ -11,7 +11,7 @@ from networking.types import IPaddr, MACaddr, IPProtocol
 
 # --- Tunable thresholds ---
 RATE_WINDOW = 2.0       # seconds — sliding window for rate measurement
-RATE_THRESHOLD = 50     # packets per window from a single src_ip → DDoS alert
+RATE_THRESHOLD = 15     # packets per window from a single src_ip → DDoS alert
 
 
 class IDS:
