@@ -56,3 +56,7 @@ class TSDict[K, V]:
             if key in self._events:
                 self._events[key].set()
                 del self._events[key]
+
+    def pop(self, key: K, default=None):
+        with self._lock:
+            return self._data.pop(key, default)

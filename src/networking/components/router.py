@@ -24,6 +24,8 @@ class Router:
     routing_table: dict[int, Node]
 
     def __init__(self, config: RouterConfig, wires: dict[str, WireConfig]):
+        self.ids_enabled = True 
+
         # Spoofing detection: src_ip → first-seen MAC
         self._ip_mac_table: dict[int, MACaddr] = {}
         self._ip_mac_lock = Lock()
@@ -56,7 +58,12 @@ class Router:
             k: interfaces[v] for k, v in config["routing_table"].items()
         }
 
+        Thread(target=self._control_loop, daemon=True).start()
+
     def _ids_inspect(self, _n: Node, ip_frame: IPFrame, src_mac: MACaddr) -> bool:
+        if not self.ids_enabled:
+            return False
+    
         src_ip = ip_frame.source
 
         # --- IP Spoofing (DAI) ---
@@ -107,3 +114,22 @@ class Router:
             return False
         self.logger.info(f"Forwarded packet to 0x{dst_ip:02x} via {n.Mac}")
         return True
+    
+    def _control_loop(self):
+        while True:
+            try:
+                cmd = input("[ROUTER] ").strip().upper()
+
+                if cmd == "IDS OFF":
+                    self.ids_enabled = False
+                    print("[ROUTER] IDS disabled")
+
+                elif cmd == "IDS ON":
+                    self.ids_enabled = True
+                    print("[ROUTER] IDS enabled")
+
+                else:
+                    print("Commands: IDS ON / IDS OFF")
+
+            except Exception as e:
+                print(f"[ROUTER] Error: {e}")
