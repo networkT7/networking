@@ -7,8 +7,7 @@ from random import randint
 from threading import Event
 from networking.firewall import Firewall, FirewallRule, FirewallAction
 from networking.collections.ts_dict import TSDict
-from networking.config import HOSTNAME, LOGGING_LEVEL
-from networking.components.wire import send_framed, recv_framed
+from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
 from networking.constants import BYTE_ENCODING_TYPE, BROADCAST_MAC
 from networking.frames import MACFrame, IPFrame, DeserializationException
 from networking.log_format import create_logger
@@ -133,7 +132,7 @@ class Node:
     def rcv_MAC_frame(self) -> None:
         while True:
             try:
-                data = recv_framed(self._socket)
+                data = self._socket.recv(RECEIVE_SIZE)
                 if not data:
                     self._logger.warning("Socket closed, stopping receiver.")
                     return
@@ -319,7 +318,7 @@ class Node:
             total_sent += 1
             idx += 1
 
-            bar_filled = (idx % len(pool))
+            bar_filled = idx % len(pool)
             bar = "#" * bar_filled + "." * (len(pool) - bar_filled)
             print(f"\r[RDDOS] [{bar}] pkts: {total_sent:<6} | src: 0x{spoofed_ip:02x} | ~200 pps", end="", flush=True)
 
@@ -333,7 +332,7 @@ class Node:
         self._logger.info(
             f"sending [MAC] src={self.Mac} dst={dst} len={len(data)} data={data.hex()}"
         )
-        send_framed(self._socket, bytes(MACFrame(self.Mac, dst, data)))
+        self._socket.sendall(bytes(MACFrame(self.Mac, dst, data)))
 
     def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
         self._logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
@@ -621,4 +620,3 @@ class Node:
     def __del__(self):
         self._socket.close()
         self._logger.debug("closing node")
-

@@ -1,36 +1,10 @@
-from queue import SimpleQueue
 import socket
 from threading import Thread, Lock
 
-from networking.config import HOSTNAME, SOCKET_TIMEOUT
+from networking.config import HOSTNAME, RECEIVE_SIZE, SOCKET_TIMEOUT
 from networking.log_format import create_logger
 
 logger = create_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Framing helpers — 2-byte big-endian length prefix on every frame.
-# Used by both Wire and Node so TCP coalescing never merges frames.
-# ---------------------------------------------------------------------------
-
-def _recv_exact(sock: socket.socket, n: int) -> bytes:
-    """Read exactly n bytes from sock, handling partial reads."""
-    buf = bytearray()
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
-            raise OSError("Connection closed")
-        buf += chunk
-    return bytes(buf)
-
-def send_framed(sock: socket.socket, data: bytes) -> None:
-    """Send data prefixed with its 2-byte big-endian length."""
-    sock.sendall(len(data).to_bytes(2, "big") + data)
-
-def recv_framed(sock: socket.socket) -> bytes:
-    """Receive one complete length-prefixed frame, blocking until full."""
-    length = int.from_bytes(_recv_exact(sock, 2), "big")
-    return _recv_exact(sock, length)
 
 
 class Wire:
@@ -47,7 +21,7 @@ class Wire:
             if sock is sender:
                 continue
             try:
-                send_framed(sock, msg)
+                sock.sendall(msg)
             except OSError as e:
                 logger.warning(f"broadcast send failed: {e}")
 
@@ -60,7 +34,7 @@ class Wire:
         conn.settimeout(None)           # must be blocking for recv_framed
         try:
             while True:
-                msg = recv_framed(conn)
+                msg = conn.recv(RECEIVE_SIZE)
                 if not msg:
                     logger.info("connection closed by peer")
                     break
