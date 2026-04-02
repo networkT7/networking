@@ -7,3 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6.0.3",
 ]
+
+[tool.pyright]
+reportUnusedCallResult = "information"
+reportUnnecessaryIsInstance = "information"

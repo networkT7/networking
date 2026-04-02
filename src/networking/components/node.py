@@ -129,13 +129,12 @@ class MITMHandler(FrameHandlerClass):
                 # =========================
                 modified = original_data
 
-            # 🔥 Build new frame
-            new_frame = IPFrame(
-                ip_frame.source, ip_frame.destination, ip_frame.protocol, modified
+            node.send_IP_frame(
+                ip_frame.destination,
+                ip_frame.protocol,
+                modified,
+                spoof_src=ip_frame.source,
             )
-
-            real_mac = node.resolve_IP(ip_frame.destination)
-            node.send_MAC_frame(real_mac, bytes(new_frame))
 
             node._logger.warning(f"[MITM] Forwarded → {modified}")
 
@@ -181,19 +180,19 @@ class MITMARPInterceptHandler(FrameHandlerClass):
         self.node._logger.warning("Removing ARP intercept handler")
         victim_mac = self.node.resolve_IP(self.victim_ip)
         router_mac = self.node.resolve_IP(self.router_ip)
-        self.node.send_spoofed_IP_frame(
-            self.victim_ip,
+        self.node.send_IP_frame(
             self.router_ip,
             IPProtocol.ARP,
             b"res",
             spoofed_mac=victim_mac,
+            spoof_src=self.victim_ip,
         )
-        self.node.send_spoofed_IP_frame(
-            self.router_ip,
+        self.node.send_IP_frame(
             self.victim_ip,
             IPProtocol.ARP,
             b"res",
             spoofed_mac=router_mac,
+            spoof_src=self.router_ip,
         )
 
 
@@ -297,11 +296,11 @@ class Node:
 
             fake_src = randint(0x01, 0xFE)
 
-            self.send_spoofed_IP_frame(
-                fake_src,
+            self.send_IP_frame(
                 target_ip,
                 IPProtocol.DATA,
                 b"flood",
+                spoof_src=fake_src,
             )
 
             total_sent += 1
@@ -345,7 +344,7 @@ class Node:
                 self._logger.warning("[SLOWLORIS] Stopped during Phase 1.")
                 return
 
-            self.send_spoofed_IP_frame(spoofed_ip, target_ip, IPProtocol.TCP, b"SYN")
+            self.send_IP_frame(target_ip, IPProtocol.TCP, b"SYN", spoof_src=spoofed_ip)
             self._logger.warning(f"[SLOWLORIS] Phase 1: SYN sent ({i + 1}/{len(pool)})")
             time.sleep(0.2)
 
@@ -364,8 +363,8 @@ class Node:
             for spoofed_ip in pool:
                 if self._slowloris_stop.is_set():
                     break
-                self.send_spoofed_IP_frame(
-                    spoofed_ip, target_ip, IPProtocol.TCP, b"KEEPALIVE"
+                self.send_IP_frame(
+                    target_ip, IPProtocol.TCP, b"KEEPALIVE", spoof_src=spoofed_ip
                 )
                 time.sleep(keepalive_sleep)
 
@@ -399,7 +398,9 @@ class Node:
 
         while not self._rddos_stop.is_set():
             spoofed_ip = pool[idx % len(pool)]
-            self.send_spoofed_IP_frame(spoofed_ip, target_ip, IPProtocol.DATA, b"flood")
+            self.send_IP_frame(
+                target_ip, IPProtocol.DATA, b"flood", spoof_src=spoofed_ip
+            )
             total_sent += 1
             idx += 1
 
@@ -426,28 +427,28 @@ class Node:
         )
         self._socket.sendall(bytes(MACFrame(spoofed_mac, dst, data)))
 
-    def send_IP_frame(self, dst: IPaddr, protocol: IPProtocol, data: bytes):
-        self._logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
-        self.send_spoofed_IP_frame(self.Ip, dst, protocol, data)
-
-    def send_spoofed_IP_frame(
+    def send_IP_frame(
         self,
-        spoof_src: IPaddr,
         dst: IPaddr,
         protocol: IPProtocol,
         data: bytes,
+        spoof_src: IPaddr | None = None,
         **kwargs: Unpack[SendMACKWargs],
     ):
-        if self.Ip != spoof_src:
+        if spoof_src:
             self._logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
+        else:
+            spoof_src = self.Ip
+
+        self._logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
+
         resolved_mac = self.resolve_IP(dst)
 
-        self.send_MAC_frame(
-            resolved_mac, bytes(IPFrame(spoof_src, dst, protocol, data)), **kwargs
-        )
+        for f in IPFrame(spoof_src, dst, protocol, data).fragment_frame():
+            self.send_MAC_frame(resolved_mac, bytes(f), **kwargs)
 
     # address resolution
-    def save_IP_mapping(self, ip, mac):
+    def save_IP_mapping(self, ip: IPaddr, mac: MACaddr):
         self.ip_mapping[ip] = mac
 
     def send_ARP_request(self, dst: IPaddr):
@@ -500,11 +501,11 @@ class Node:
                     self.send_IP_frame(int(dst, base=16), IPProtocol.TCP, b"SYN")
 
                 case ["SPOOF", fake_src, dst, *msg]:
-                    self.send_spoofed_IP_frame(
-                        int(fake_src, base=16),
+                    self.send_IP_frame(
                         int(dst, base=16),
                         IPProtocol.DATA,
                         " ".join(msg).encode(BYTE_ENCODING_TYPE),
+                        spoof_src=int(fake_src, base=16),
                     )
 
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:

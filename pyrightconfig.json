@@ -1,5 +1,0 @@
-{
-  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/refs/heads/main/packages/vscode-pyright/schemas/pyrightconfig.schema.json",
-  "reportUnusedCallResult": "information",
-  "reportUnnecessaryIsInstance": "information"
-}
