@@ -3,7 +3,23 @@ import time
 from networking.components.node import FrameHandlerClass, Node
 from networking.constants import BYTE_ENCODING_TYPE
 from networking.frames import IPFrame
-from networking.types import IPProtocol, MACaddr
+from networking.types import FragmentId, IPProtocol, IPaddr, MACaddr
+
+
+class IPFragmentHandler(FrameHandlerClass):
+    fragments: dict[tuple[FragmentId, IPaddr, IPaddr, IPProtocol], IPFrame]
+
+    def __init__(self):
+        self.fragments = {}
+        super().__init__(lambda _, frame: frame.is_fragmented, self.on_request)
+
+    def on_request(self, _node: Node, frame: IPFrame, _mac: MACaddr):
+        key = (frame.fragment_id, frame.source, frame.destination, frame.protocol)
+        frag = self.fragments.pop(key, None)
+        if frag:
+            return IPFrame.defragment_frame([frag, frame])
+        else:
+            self.fragments[key] = frame
 
 
 class ARPRequestHandler(FrameHandlerClass):
@@ -20,10 +36,9 @@ class ARPRequestHandler(FrameHandlerClass):
     @staticmethod
     def on_request(node: Node, frame: IPFrame, src_mac: MACaddr):
         src = frame.source
-        node._logger.debug(f"ARP request received from 0x{src:02x}")
+        node.logger.debug(f"ARP request received from 0x{src:02x}")
         node.save_IP_mapping(src, src_mac)
         node.send_ARP_response(src_mac, node.Ip, src)
-        return True
 
 
 class ARPResponseHandler(FrameHandlerClass):
@@ -40,9 +55,9 @@ class ARPResponseHandler(FrameHandlerClass):
     @staticmethod
     def on_request(node: Node, frame: IPFrame, src_mac: MACaddr):
         src = frame.source
-        node._logger.debug(f"ARP response received from 0x{src:02x}")
+        node.logger.debug(f"ARP response received from 0x{src:02x}")
         node.save_IP_mapping(src, src_mac)
-        return True
+
 
 class PingRequestHandler(FrameHandlerClass):
     def __init__(self):
@@ -58,9 +73,8 @@ class PingRequestHandler(FrameHandlerClass):
     @staticmethod
     def on_request(node: Node, frame: IPFrame, _: MACaddr):
         src = frame.source
-        node._logger.info(f"Ping request received from 0x{src:02x}")
+        node.logger.info(f"Ping request received from 0x{src:02x}")
         node.send_IP_frame(src, IPProtocol.PING, b"res")
-        return True
 
 
 class PingResponseHandler(FrameHandlerClass):
@@ -76,8 +90,7 @@ class PingResponseHandler(FrameHandlerClass):
 
     @staticmethod
     def on_request(node: Node, frame: IPFrame, _: MACaddr):
-        node._logger.info(f"Ping reply received from 0x{frame.source:02x}")
-        return True
+        node.logger.info(f"Ping reply received from 0x{frame.source:02x}")
 
 
 class TCPConnectionHandler(FrameHandlerClass):
@@ -88,7 +101,7 @@ class TCPConnectionHandler(FrameHandlerClass):
         )
 
     @staticmethod
-    def on_request(node: Node, frame: IPFrame, _: MACaddr) -> bool:
+    def on_request(node: Node, frame: IPFrame, _: MACaddr):
         src = frame.source
         payload = frame.data
         now = time.monotonic()
@@ -100,12 +113,10 @@ class TCPConnectionHandler(FrameHandlerClass):
             if payload == b"SYN":
                 if src in node._conn_table:
                     node._conn_table[src]["last_activity"] = now
-                    node._logger.info(
-                        f"[TCP] Duplicate SYN from 0x{src:02x}, refreshed"
-                    )
+                    node.logger.info(f"[TCP] Duplicate SYN from 0x{src:02x}, refreshed")
                     reply = b"SYN-ACK"  # ← [CONNECT] re-acknowledge existing connection
                 elif len(node._conn_table) >= node._max_connections:
-                    node._logger.warning(
+                    node.logger.warning(
                         f"[TCP] Connection limit reached ({node._max_connections}), "
                         f"dropping SYN from 0x{src:02x}"
                     )
@@ -116,7 +127,7 @@ class TCPConnectionHandler(FrameHandlerClass):
                         "last_activity": now,
                     }
                     count = len(node._conn_table)
-                    node._logger.info(
+                    node.logger.info(
                         f"[TCP] Connection {count}/{node._max_connections} "
                         f"from 0x{src:02x} (HALF_OPEN)"
                     )
@@ -125,31 +136,25 @@ class TCPConnectionHandler(FrameHandlerClass):
             elif payload == b"KEEPALIVE":
                 if src in node._conn_table:
                     node._conn_table[src]["last_activity"] = now
-                    node._logger.debug(
-                        f"[TCP] Keepalive from 0x{src:02x}"
-                    )
+                    node.logger.debug(f"[TCP] Keepalive from 0x{src:02x}")
                 else:
-                    node._logger.debug(
+                    node.logger.debug(
                         f"[TCP] Keepalive from 0x{src:02x} with no connection, ignored"
                     )
 
             elif payload == b"FIN":
                 if src in node._conn_table:
                     del node._conn_table[src]
-                    node._logger.info(
-                        f"[TCP] Connection from 0x{src:02x} closed (FIN)"
-                    )
+                    node.logger.info(f"[TCP] Connection from 0x{src:02x} closed (FIN)")
 
         # ← [CONNECT] send reply outside the lock to avoid holding it during ARP resolution
         if reply is not None:
             try:
                 node.send_IP_frame(src, IPProtocol.TCP, reply)
             except TimeoutError:
-                node._logger.warning(
+                node.logger.warning(
                     f"[TCP] Could not send {reply!r} to 0x{src:02x} (ARP timeout)"
                 )
-
-        return True
 
 
 # ← [CONNECT] handles SYN-ACK / RST replies on the connecting node's side
@@ -165,13 +170,12 @@ class TCPConnectResponseHandler(FrameHandlerClass):
         )
 
     @staticmethod
-    def on_request(node: Node, frame: IPFrame, _: MACaddr) -> bool:
+    def on_request(node: Node, frame: IPFrame, _: MACaddr):
         src = frame.source
         if frame.data == b"SYN-ACK":
-            node._logger.info(f"[TCP] CONNECT to 0x{src:02x} ACCEPTED")
+            node.logger.info(f"[TCP] CONNECT to 0x{src:02x} ACCEPTED")
         else:
-            node._logger.info(f"[TCP] CONNECT to 0x{src:02x} REFUSED — table full")
-        return True
+            node.logger.info(f"[TCP] CONNECT to 0x{src:02x} REFUSED — table full")
 
 
 class DataHandler(FrameHandlerClass):
@@ -183,7 +187,6 @@ class DataHandler(FrameHandlerClass):
 
     @staticmethod
     def on_request(node: Node, frame: IPFrame, _: MACaddr):
-        node._logger.info(
+        node.logger.info(
             f"[DATA] Message from 0x{frame.source:02x}: {frame.data.decode(BYTE_ENCODING_TYPE)}"
         )
-        return True

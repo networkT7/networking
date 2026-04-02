@@ -21,7 +21,7 @@ from networking.types import (
 IPFramePredicate = Callable[["Node", IPFrame], bool]
 """ check if the current IP frame should be handled by the handler """
 
-IPFrameHandler = Callable[["Node", IPFrame, MACaddr], bool]
+IPFrameHandler = Callable[["Node", IPFrame, MACaddr], IPFrame | None]
 """
 runs on the IP frame to be handled
 the return value determines if the handling chain should be stopped
@@ -36,8 +36,12 @@ class FrameHandlerClass:
         self.predicate = predicate
         self.handler = handler
 
-    def try_handle(self, node: "Node", ip_frame: IPFrame, src_mac: MACaddr) -> bool:
-        return self.predicate(node, ip_frame) and self.handler(node, ip_frame, src_mac)
+    def try_handle(
+        self, node: "Node", ip_frame: IPFrame, src_mac: MACaddr
+    ) -> IPFrame | None:
+        return (self.predicate(node, ip_frame) or None) and self.handler(
+            node, ip_frame, src_mac
+        )
 
 
 HELP = """
@@ -80,14 +84,14 @@ class MITMHandler(FrameHandlerClass):
 
             return ip_frame.source == victim_ip
 
-        def handler(node: "Node", ip_frame: IPFrame, src_mac: MACaddr) -> bool:
+        def handler(node: "Node", ip_frame: IPFrame, _: MACaddr):
 
             if not getattr(node, "_mitm_active", False):
                 return False
 
             original_data = ip_frame.data
 
-            node._logger.warning(
+            node.logger.warning(
                 f"[MITM] Intercepted packet: "
                 f"src=0x{ip_frame.source:02x} dst=0x{ip_frame.destination:02x} "
                 f"proto={IPProtocol(ip_frame.protocol).name} data={original_data}"
@@ -118,7 +122,7 @@ class MITMHandler(FrameHandlerClass):
 
                 elif choice == "3":
                     print("[MITM] Packet dropped.")
-                    return True
+                    return
 
                 else:
                     modified = original_data
@@ -136,9 +140,7 @@ class MITMHandler(FrameHandlerClass):
                 spoof_src=ip_frame.source,
             )
 
-            node._logger.warning(f"[MITM] Forwarded → {modified}")
-
-            return True
+            node.logger.warning(f"[MITM] Forwarded → {modified}")
 
         super().__init__(predicate, handler)
 
@@ -166,18 +168,17 @@ class MITMARPInterceptHandler(FrameHandlerClass):
                 and f.destination == router_ip
             )
 
-        def handler(node: "Node", f: IPFrame, src_mac: MACaddr) -> bool:
-            node._logger.warning(
+        def handler(node: "Node", f: IPFrame, src_mac: MACaddr):
+            node.logger.warning(
                 f"[MITM] Intercepted ARP req from 0x{f.source:02x} for 0x{f.destination:02x} — spoofing response"
             )
             # Reply to victim claiming we are the router
             node.send_ARP_response(src_mac, router_ip, dst_ip=victim_ip)
-            return True
 
         super().__init__(predicate, handler)
 
     def __del__(self):
-        self.node._logger.warning("Removing ARP intercept handler")
+        self.node.logger.warning("Removing ARP intercept handler")
         victim_mac = self.node.resolve_IP(self.victim_ip)
         router_mac = self.node.resolve_IP(self.router_ip)
         self.node.send_IP_frame(
@@ -205,7 +206,7 @@ class Node:
     Ip: IPaddr
     subnet: IPaddr
     subnet_mask: IPaddr
-    _logger: Logger
+    logger: Logger
     _socket: socket.socket
     sniffing: bool
     ip_mapping: TSDict[IPaddr, MACaddr]
@@ -217,21 +218,21 @@ class Node:
             try:
                 data = self._socket.recv(RECEIVE_SIZE)
                 if not data:
-                    self._logger.warning("Socket closed, stopping receiver.")
+                    self.logger.warning("Socket closed, stopping receiver.")
                     return
                 frame = MACFrame.from_bytes(data)
 
             except DeserializationException as e:
-                self._logger.warning(f"Dropping malformed frame: {e}")
+                self.logger.warning(f"Dropping malformed frame: {e}")
                 continue
 
             except OSError as e:
-                self._logger.warning(f"Socket error: {e}")
+                self.logger.warning(f"Socket error: {e}")
                 return
 
             match frame:
                 case MACFrame(src, dst, _, bites) if dst in (self.Mac, BROADCAST_MAC):
-                    self._logger.info(
+                    self.logger.info(
                         f"receiving [MAC] src={src} dst={dst} len={len(bites)} data={bites.hex()}"
                     )
                     self.rcv_IP_frame(bites, src)
@@ -239,12 +240,12 @@ class Node:
                 case MACFrame(src, dst, _, data) if self.sniffing:
                     try:
                         ip = IPFrame.from_bytes(frame.data)
-                        self._logger.warning("[SNIFF] ...")
+                        self.logger.warning("[SNIFF] ...")
                         for handler in self.ip_handlers:
                             if handler.try_handle(self, ip, src):
                                 break
                     except DeserializationException:
-                        self._logger.warning(
+                        self.logger.warning(
                             f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
                         )
 
@@ -252,17 +253,17 @@ class Node:
         try:
             ip_frame = IPFrame.from_bytes(byte_arr)
         except DeserializationException as e:
-            self._logger.warning(str(e))
+            self.logger.warning(str(e))
             return
 
         # Firewall check
         if self.firewall is not None and not self.firewall.check(ip_frame):
-            self._logger.warning(
+            self.logger.warning(
                 f"Firewall dropped packet from 0x{ip_frame.source:02x} to 0x{ip_frame.destination:02x} "
             )
             return
 
-        self._logger.info(
+        self.logger.info(
             f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{
                 ip_frame.destination:02x} with protocol {
                 IPProtocol(ip_frame.protocol).name
@@ -278,7 +279,7 @@ class Node:
         return self
 
     def ddos(self, target_ip: IPaddr):
-        self._logger.warning(f"[DDOS] Starting DDoS on 0x{target_ip:02x}")
+        self.logger.warning(f"[DDOS] Starting DDoS on 0x{target_ip:02x}")
 
         if self._ddos_stop is None:
             self._ddos_stop = Event()
@@ -291,7 +292,7 @@ class Node:
                 print(
                     f"\r[DDOS] Stopped. Total packets sent: {total_sent:<8}", flush=True
                 )
-                self._logger.warning("[DDOS] Stopped.")
+                self.logger.warning("[DDOS] Stopped.")
                 break
 
             fake_src = randint(0x01, 0xFE)
@@ -321,10 +322,10 @@ class Node:
         ]
         for ip in stale:
             del self._conn_table[ip]
-            self._logger.debug(f"[TCP] Connection from 0x{ip:02x} timed out")
+            self.logger.debug(f"[TCP] Connection from 0x{ip:02x} timed out")
 
     def slowloris(self, target_ip: IPaddr):
-        self._logger.warning(f"[SLOWLORIS] Starting Slowloris on 0x{target_ip:02x}")
+        self.logger.warning(f"[SLOWLORIS] Starting Slowloris on 0x{target_ip:02x}")
 
         if self._slowloris_stop is None:
             self._slowloris_stop = Event()
@@ -337,15 +338,15 @@ class Node:
         # (shared IPs trigger the router's DAI and get dropped)
         base = (self.Ip & 0x0F) * 12
         pool = [(0x80 + base + i) & 0xFF for i in range(12)]  # 12 spoofed source IPs
-        self._logger.warning(f"[SLOWLORIS] Phase 1: Opening {len(pool)} connections...")
+        self.logger.warning(f"[SLOWLORIS] Phase 1: Opening {len(pool)} connections...")
 
         for i, spoofed_ip in enumerate(pool):
             if self._slowloris_stop.is_set():
-                self._logger.warning("[SLOWLORIS] Stopped during Phase 1.")
+                self.logger.warning("[SLOWLORIS] Stopped during Phase 1.")
                 return
 
             self.send_IP_frame(target_ip, IPProtocol.TCP, b"SYN", spoof_src=spoofed_ip)
-            self._logger.warning(f"[SLOWLORIS] Phase 1: SYN sent ({i + 1}/{len(pool)})")
+            self.logger.warning(f"[SLOWLORIS] Phase 1: SYN sent ({i + 1}/{len(pool)})")
             time.sleep(0.2)
 
         # Phase 2: Hold connections open with keepalives
@@ -353,7 +354,7 @@ class Node:
         # 12 IPs x 0.5s = 6s per cycle — safely under 10s timeout.
         keepalive_sleep = 0.5
         cycle_time = len(pool) * keepalive_sleep
-        self._logger.warning(
+        self.logger.warning(
             f"[SLOWLORIS] Phase 2: Holding connections, "
             f"cycle every {cycle_time:.0f}s, ~{1 / keepalive_sleep:.0f} pps"
         )
@@ -369,15 +370,15 @@ class Node:
                 time.sleep(keepalive_sleep)
 
             cycle_count += 1
-            self._logger.warning(
+            self.logger.warning(
                 f"[SLOWLORIS] Status: keepalive cycle {cycle_count} complete "
                 f"({len(pool)} connections maintained)"
             )
 
-        self._logger.warning("[SLOWLORIS] Stopped.")
+        self.logger.warning("[SLOWLORIS] Stopped.")
 
     def rddos(self, target_ip: IPaddr):
-        self._logger.warning(
+        self.logger.warning(
             f"[RDDOS] Starting rotating source DDoS on 0x{target_ip:02x}"
         )
 
@@ -387,7 +388,7 @@ class Node:
             self._rddos_stop.clear()
 
         pool = list(range(0xC0, 0xD4))  # 20 spoofed source IPs
-        self._logger.warning(
+        self.logger.warning(
             f"[RDDOS] Using {len(pool)} rotating sources, "
             f"~{1000 / 5:.0f} pps aggregate, "
             f"~{1000 / (5 * len(pool)):.0f} pps per source"
@@ -415,14 +416,14 @@ class Node:
             time.sleep(0.005)
 
         print(f"\r[RDDOS] Stopped. Total packets sent: {total_sent:<8}", flush=True)
-        self._logger.warning(f"[RDDOS] Stopped. Total packets sent: {total_sent}")
+        self.logger.warning(f"[RDDOS] Stopped. Total packets sent: {total_sent}")
 
     # sending
     def send_MAC_frame(
         self, dst: MACaddr, data: bytes, **kwargs: Unpack[SendMACKWargs]
     ):
         spoofed_mac = kwargs.get("spoofed_mac") or self.Mac
-        self._logger.info(
+        self.logger.info(
             f"sending [MAC] src={spoofed_mac} dst={dst} len={len(data)} data={data.hex()}"
         )
         self._socket.sendall(bytes(MACFrame(spoofed_mac, dst, data)))
@@ -436,11 +437,11 @@ class Node:
         **kwargs: Unpack[SendMACKWargs],
     ):
         if spoof_src:
-            self._logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
+            self.logger.warning(f"[SPOOF] sending as 0x{spoof_src:02x} to 0x{dst:02x}")
         else:
             spoof_src = self.Ip
 
-        self._logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
+        self.logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
 
         resolved_mac = self.resolve_IP(dst)
 
@@ -471,11 +472,11 @@ class Node:
             dst if dst & self.subnet_mask == self.subnet else self.subnet | 0x01
         )
 
-        self._logger.debug(f"resolving ip 0x{next_hop_ip:02x}")
+        self.logger.debug(f"resolving ip 0x{next_hop_ip:02x}")
         if next_hop_ip not in self.ip_mapping:
             self.send_ARP_request(next_hop_ip)
         mac = self.ip_mapping.block_until(next_hop_ip)
-        self._logger.debug(f"resolved, mac is {mac}")
+        self.logger.debug(f"resolved, mac is {mac}")
         return mac
 
     # object methods
@@ -561,7 +562,7 @@ class Node:
 
                     Thread(target=poison_loop, daemon=True).start()
 
-                    self._logger.warning(
+                    self.logger.warning(
                         f"[MITM] Attack started against 0x{victim_ip:02x}"
                     )
 
@@ -705,7 +706,7 @@ class Node:
     def __init__(self, node_config: NodeConfig, wire_config: WireConfig):
         self.Mac = node_config["MAC"]
         self.Ip = node_config["IP"]
-        self._logger = create_logger(self.Mac, level=LOGGING_LEVEL)
+        self.logger = create_logger(self.Mac, level=LOGGING_LEVEL)
         self.subnet = wire_config["subnet"]
         self.subnet_mask = wire_config["subnetMask"]
         self._socket = socket.create_connection((HOSTNAME, wire_config["port"]))
@@ -725,13 +726,13 @@ class Node:
         self._max_connections = 10
         self._conn_timeout = 10.0
 
-        self._logger.info("connected to wire")
+        self.logger.info("connected to wire")
 
         if node_config.get("firewall", False):
             self.firewall: Firewall | None = Firewall(
-                self._logger, default_policy=FirewallAction.ACCEPT
+                self.logger, default_policy=FirewallAction.ACCEPT
             )
-            self._logger.info("Firewall enabled")
+            self.logger.info("Firewall enabled")
         else:
             self.firewall = None
 
@@ -743,12 +744,12 @@ class Node:
             try:
                 self.rcv_MAC_frame()
             except Exception as e:
-                self._logger.error(f"Receiver thread crashed: {e}")
+                self.logger.error(f"Receiver thread crashed: {e}")
             finally:
-                self._logger.warning("Receiver thread exited.")
+                self.logger.warning("Receiver thread exited.")
 
         Thread(target=watched, daemon=True).start()
 
     def __del__(self):
         self._socket.close()
-        self._logger.debug("closing node")
+        self.logger.debug("closing node")

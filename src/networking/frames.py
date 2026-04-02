@@ -6,6 +6,7 @@ from typing import override
 
 from networking.constants import BYTE_ENCODING_TYPE
 from networking.types import (
+    FragmentId,
     MACaddr,
     IPaddr,
     valid_MAC,
@@ -231,7 +232,7 @@ class IPFrame:
         return self.__fragment_info & FRAGMENT_OFFSET_MASK
 
     @property
-    def fragment_id(self) -> int:
+    def fragment_id(self) -> FragmentId:
         """
         Returns the fragment id used for the IP packet
         """

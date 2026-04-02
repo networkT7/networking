@@ -3,6 +3,7 @@ from typing import TypedDict, TypeGuard, NotRequired
 
 MACaddr = str
 IPaddr = int
+FragmentId = int
 
 
 class IPProtocol(IntEnum):
