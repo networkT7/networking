@@ -3,15 +3,15 @@ from collections import defaultdict
 from threading import Lock
 from logging import Logger
 
-from networking.components.node import FrameHandlerClass, Node
+from networking.components.node import FrameHandler, Node
 from networking.firewall import Firewall, FirewallRule, FirewallAction
 from networking.frames import IPFrame
 from networking.types import IPaddr, MACaddr, IPProtocol
 
 
 # --- Tunable thresholds ---
-RATE_WINDOW = 2.0       # seconds — sliding window for rate measurement
-RATE_THRESHOLD = 15     # packets per window from a single src_ip → DDoS alert
+RATE_WINDOW = 2.0  # seconds — sliding window for rate measurement
+RATE_THRESHOLD = 15  # packets per window from a single src_ip → DDoS alert
 
 
 class IDS:
@@ -45,7 +45,7 @@ class IDS:
         self._spoof_counts: dict[IPaddr, int] = defaultdict(int)
         self._spoof_lock = Lock()
 
-        self.handler = FrameHandlerClass(
+        self.handler = FrameHandler(
             lambda _node, _frame: True,
             self._inspect,
         )
@@ -54,12 +54,14 @@ class IDS:
     # Main inspection entry point
     # ------------------------------------------------------------------
 
-    def _inspect(self, node: Node, ip_frame: IPFrame, src_mac: MACaddr) -> bool:
-        self._logger.debug(f"[IDS] _inspect called: src_ip=0x{ip_frame.source:02x} src_mac={src_mac}")  # ← temp
+    def _inspect(self, node: Node, ip_frame: IPFrame, src_mac: MACaddr):
+        self._logger.debug(
+            f"[IDS] _inspect called: src_ip=0x{ip_frame.source:02x} src_mac={src_mac}"
+        )  # ← temp
         self._check_arp_spoof(node, ip_frame, src_mac)
         self._check_ip_mac_consistency(node, ip_frame, src_mac)
         self._check_ddos(node, ip_frame)
-        return False  # never consume — always pass to next handler
+        return ip_frame  # never consume — always pass to next handler
 
     # ------------------------------------------------------------------
     # Detection: DDoS
@@ -111,9 +113,7 @@ class IDS:
             known_mac = self._arp_table.get(src_ip)
             if known_mac is None:
                 self._arp_table[src_ip] = src_mac
-                self._logger.debug(
-                    f"[IDS] Learned ARP: 0x{src_ip:02x} → '{src_mac}'"
-                )
+                self._logger.debug(f"[IDS] Learned ARP: 0x{src_ip:02x} → '{src_mac}'")
                 return
 
             if known_mac != src_mac:
@@ -129,11 +129,14 @@ class IDS:
                         + (f" (x{count})" if count > 1 else "")
                     )
                 self._block(node, src_ip, reason="ARP spoof")
+
     # ------------------------------------------------------------------
     # Detection: IP Spoofing (DATA / PING frames)
     # ------------------------------------------------------------------
 
-    def _check_ip_mac_consistency(self, node: Node, ip_frame: IPFrame, src_mac: MACaddr):
+    def _check_ip_mac_consistency(
+        self, node: Node, ip_frame: IPFrame, src_mac: MACaddr
+    ):
         """
         Detects forged src_ip in DATA/PING frames.
         First packet from a src_ip seeds the trust table.

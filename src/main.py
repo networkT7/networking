@@ -1,13 +1,12 @@
 from sys import argv, executable
 
+from networking.applications.ddos import DDOSApplication
+from networking.applications.mitm import MITMApplication
+from networking.applications.tcp import TCPApplication
 from networking.components.handlers import (
-    ARPRequestHandler,
-    ARPResponseHandler,
+    ARPHandler,
     DataHandler,
-    PingRequestHandler,
-    PingResponseHandler,
-    TCPConnectionHandler,
-    TCPConnectResponseHandler,  # ← [CONNECT]
+    PingHandler,
 )
 from networking.config import config
 from networking.components.node import Node
@@ -52,25 +51,24 @@ match argv:
         from networking.ids import IDS
         from networking.log_format import create_logger
         from networking.config import LOGGING_LEVEL
+
         ids = IDS(create_logger(f"IDS-{node_name}", level=LOGGING_LEVEL))
         ids.seed(c["IP"], c["MAC"])
 
+        n = Node(c, wire)
         (
-            Node(c, wire)
-            .add_handler(ids.handler)
-            .add_handler(ARPRequestHandler())
-            .add_handler(ARPResponseHandler())
-            .add_handler(PingRequestHandler())
-            .add_handler(PingResponseHandler())
-            .add_handler(TCPConnectResponseHandler())  # ← [CONNECT] before TCPConnectionHandler so SYN-ACK/RST are caught first
-            .add_handler(TCPConnectionHandler())
+            n.add_handler(ids.handler)
+            .add_handler(ARPHandler())
+            .add_handler(PingHandler())
             .add_handler(DataHandler())
+            .add_application("mitm", MITMApplication(n))
+            .add_application("tcp", TCPApplication(n))
+            .add_application("ddos", DDOSApplication(n))
             .input()
         )
 
     case [_, "router"]:
-        Router(config["routers"], config["wires"])
-        input("Router running... Press Enter to exit.\n")
+        _ = Router(config["routers"], config["wires"])
 
     case _:
         usage()

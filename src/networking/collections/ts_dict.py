@@ -1,5 +1,5 @@
 from threading import Lock, Event
-from typing import Iterator
+from collections.abc import Iterator
 
 
 class TSDict[K, V]:
@@ -8,7 +8,7 @@ class TSDict[K, V]:
     """
 
     def __init__(self):
-        self._lock = Lock()
+        self._lock: Lock = Lock()
         self._data: dict[K, V] = {}
         self._events: dict[K, Event] = {}
 
@@ -57,6 +57,6 @@ class TSDict[K, V]:
                 self._events[key].set()
                 del self._events[key]
 
-    def pop(self, key: K, default=None):
+    def pop(self, key: K, default: V | None = None):
         with self._lock:
             return self._data.pop(key, default)

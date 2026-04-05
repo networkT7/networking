@@ -1,8 +1,9 @@
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import TypedDict, TypeGuard, NotRequired
 
 MACaddr = str
 IPaddr = int
+FragmentId = int
 
 
 class IPProtocol(IntEnum):
@@ -10,6 +11,15 @@ class IPProtocol(IntEnum):
     PING = 1
     ARP = 2
     TCP = 3
+
+
+class BytesEnum(bytes, Enum):
+    pass
+
+
+class PayloadType(BytesEnum):
+    REQ = b"req"
+    RES = b"res"
 
 
 class MetaConf(TypedDict):
