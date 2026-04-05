@@ -231,22 +231,25 @@ class Node:
                     msg = " ".join(msg)
                     if not msg:
                         print("Message cannot be empty")
-
-                    self.send_IP_frame(
-                        int(dst, base=16),
-                        IPProtocol.DATA,
-                        msg.encode(BYTE_ENCODING_TYPE),
-                    )
+                    else:
+                        dst_ip = int(dst, base=16)
+                        if dst_ip == self.Ip:
+                            self.logger.info(f"rcving b'{msg}' from 0x{self.Ip:02x} to 0x{self.Ip:02x} with protocol DATA")
+                            self.logger.info(f"[DATA] Message from 0x{self.Ip:02x}: {msg}")
+                        else:
+                            self.send_IP_frame(dst_ip, IPProtocol.DATA, msg.encode(BYTE_ENCODING_TYPE))
 
                 case ["PING", dst]:
-                    self.send_IP_frame(
-                        int(dst, base=16), IPProtocol.PING, PayloadType.REQ
-                    )
-
+                    dst_ip = int(dst, base=16)
+                    if dst_ip == self.Ip:
+                        self.logger.info(f"Ping request received from 0x{self.Ip:02x}")
+                        self.logger.info(f"Ping reply received from 0x{self.Ip:02x}")
+                    else:
+                        self.send_IP_frame(dst_ip, IPProtocol.PING, PayloadType.REQ)
                 case [
                     "CONNECT",
                     dst,
-                ]:  # ← [CONNECT] sends SYN; reply logged by TCPConnectResponseHandler
+                ]: 
                     self.applications["tcp"].handle_command(self, dst)
 
                 case ["SPOOF", fake_src, dst, *msg]:
