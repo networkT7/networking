@@ -1,3 +1,4 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from logging import Logger
 import socket
@@ -140,11 +141,7 @@ class Node:
             return
 
         self.logger.debug(
-            f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{
-                ip_frame.destination:02x} with protocol {
-                IPProtocol(ip_frame.protocol).name
-            }"
-        )
+            f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{ip_frame.destination:02x} with protocol {IPProtocol(ip_frame.protocol).name}")
 
         self.handle_ip_frame(ip_frame, src_mac)
 

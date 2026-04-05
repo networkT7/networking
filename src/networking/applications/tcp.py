@@ -1,3 +1,4 @@
+from __future__ import annotations
 from logging import Logger
 from threading import Lock
 import time

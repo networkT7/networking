@@ -1,3 +1,4 @@
+from __future__ import annotations
 from threading import Thread
 import time
 from typing import override
