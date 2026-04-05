@@ -1,12 +1,12 @@
 import time
 
-from networking.components.node import FrameHandlerClass, Node
+from networking.components.node import FrameHandler, Node
 from networking.constants import BYTE_ENCODING_TYPE
 from networking.frames import IPFrame
 from networking.types import FragmentId, IPProtocol, IPaddr, MACaddr
 
 
-class IPFragmentHandler(FrameHandlerClass):
+class IPFragmentHandler(FrameHandler):
     fragments: dict[tuple[FragmentId, IPaddr, IPaddr, IPProtocol], IPFrame]
 
     def __init__(self):
@@ -22,78 +22,44 @@ class IPFragmentHandler(FrameHandlerClass):
             self.fragments[key] = frame
 
 
-class ARPRequestHandler(FrameHandlerClass):
+class ARPHandler(FrameHandler):
     def __init__(self):
         super().__init__(
-            lambda node, f: (
-                f.protocol == IPProtocol.ARP
-                and f.data == b"req"
-                and node.Ip == f.destination
-            ),
+            lambda node, f: f.protocol == IPProtocol.ARP and node.Ip == f.destination,
             self.on_request,
         )
 
     @staticmethod
     def on_request(node: Node, frame: IPFrame, src_mac: MACaddr):
         src = frame.source
-        node.logger.debug(f"ARP request received from 0x{src:02x}")
         node.save_IP_mapping(src, src_mac)
-        node.send_ARP_response(src_mac, node.Ip, src)
+        match frame.data:
+            case b"req":
+                node.logger.debug(f"ARP request received from 0x{src:02x}")
+                node.send_ARP_response(src_mac, node.Ip, src)
+            case b"res":
+                node.logger.debug(f"ARP response received from 0x{src:02x}")
 
 
-class ARPResponseHandler(FrameHandlerClass):
+class PingHandler(FrameHandler):
     def __init__(self):
         super().__init__(
-            lambda node, f: (
-                f.protocol == IPProtocol.ARP
-                and f.data == b"res"
-                and node.Ip == f.destination
-            ),
-            self.on_request,
-        )
-
-    @staticmethod
-    def on_request(node: Node, frame: IPFrame, src_mac: MACaddr):
-        src = frame.source
-        node.logger.debug(f"ARP response received from 0x{src:02x}")
-        node.save_IP_mapping(src, src_mac)
-
-
-class PingRequestHandler(FrameHandlerClass):
-    def __init__(self):
-        super().__init__(
-            lambda node, f: (
-                f.protocol == IPProtocol.PING
-                and f.data == b"req"
-                and node.Ip == f.destination
-            ),
+            lambda node, f: f.protocol == IPProtocol.PING and node.Ip == f.destination,
             self.on_request,
         )
 
     @staticmethod
     def on_request(node: Node, frame: IPFrame, _: MACaddr):
         src = frame.source
-        node.logger.info(f"Ping request received from 0x{src:02x}")
-        node.send_IP_frame(src, IPProtocol.PING, b"res")
+        match frame.data:
+            case b"req":
+                node.logger.info(f"Ping request received from 0x{src:02x}")
+                node.send_IP_frame(src, IPProtocol.PING, b"res")
+            case b"res":
+                node.logger.info(f"Ping reply received from 0x{frame.source:02x}")
 
 
-class PingResponseHandler(FrameHandlerClass):
-    def __init__(self):
-        super().__init__(
-            lambda node, f: (
-                f.protocol == IPProtocol.PING
-                and f.data == b"res"
-                and node.Ip == f.destination
-            ),
-            self.on_request,
-        )
-
-    @staticmethod
-    def on_request(node: Node, frame: IPFrame, _: MACaddr):
-        node.logger.info(f"Ping reply received from 0x{frame.source:02x}")
-
-
-class TCPConnectionHandler(FrameHandlerClass):
+class TCPConnectionHandler(FrameHandler):
     def __init__(self):
         super().__init__(
             lambda node, f: f.protocol == IPProtocol.TCP and node.Ip == f.destination,
@@ -158,7 +124,7 @@ class TCPConnectionHandler(FrameHandlerClass):
 
 
 # ← [CONNECT] handles SYN-ACK / RST replies on the connecting node's side
-class TCPConnectResponseHandler(FrameHandlerClass):
+class TCPConnectResponseHandler(FrameHandler):
     def __init__(self):
         super().__init__(
             lambda node, f: (
@@ -178,7 +144,7 @@ class TCPConnectResponseHandler(FrameHandlerClass):
             node.logger.info(f"[TCP] CONNECT to 0x{src:02x} REFUSED — table full")
 
 
-class DataHandler(FrameHandlerClass):
+class DataHandler(FrameHandler):
     def __init__(self):
         super().__init__(
             lambda node, f: f.protocol == IPProtocol.DATA and node.Ip == f.destination,

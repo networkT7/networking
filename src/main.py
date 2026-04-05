@@ -1,11 +1,10 @@
 from sys import argv, executable
 
+from networking.components.applications import MITMApplication, MITMHandler
 from networking.components.handlers import (
-    ARPRequestHandler,
-    ARPResponseHandler,
+    ARPHandler,
     DataHandler,
-    PingRequestHandler,
-    PingResponseHandler,
+    PingHandler,
     TCPConnectionHandler,
     TCPConnectResponseHandler,  # ← [CONNECT]
 )
@@ -52,21 +51,22 @@ match argv:
         from networking.ids import IDS
         from networking.log_format import create_logger
         from networking.config import LOGGING_LEVEL
+
         ids = IDS(create_logger(f"IDS-{node_name}", level=LOGGING_LEVEL))
         ids.seed(c["IP"], c["MAC"])
 
-        (
+        n = (
             Node(c, wire)
             .add_handler(ids.handler)
-            .add_handler(ARPRequestHandler())
-            .add_handler(ARPResponseHandler())
-            .add_handler(PingRequestHandler())
-            .add_handler(PingResponseHandler())
-            .add_handler(TCPConnectResponseHandler())  # ← [CONNECT] before TCPConnectionHandler so SYN-ACK/RST are caught first
+            .add_handler(ARPHandler())
+            .add_handler(PingHandler())
+            .add_handler(
+                TCPConnectResponseHandler()
+            )  # ← [CONNECT] before TCPConnectionHandler so SYN-ACK/RST are caught first
             .add_handler(TCPConnectionHandler())
             .add_handler(DataHandler())
-            .input()
         )
+        n.add_application("mitm", MITMApplication(n)).input()
 
     case [_, "router"]:
         Router(config["routers"], config["wires"])

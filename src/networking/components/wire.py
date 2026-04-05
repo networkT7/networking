@@ -1,16 +1,16 @@
 import socket
 from threading import Thread, Lock
 
-from networking.config import HOSTNAME, RECEIVE_SIZE, SOCKET_TIMEOUT
+from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE, SOCKET_TIMEOUT
 from networking.log_format import create_logger
 
-logger = create_logger(__name__)
+logger = create_logger(__name__, level=LOGGING_LEVEL)
 
 
 class Wire:
     __server: socket.socket
     __targets: list[socket.socket]
-    __lock: Lock                        # guards __targets during broadcast
+    __lock: Lock  # guards __targets during broadcast
 
     def _broadcast(self, msg: bytes, sender: socket.socket):
         """Send msg to every connected socket except the sender."""
@@ -31,7 +31,7 @@ class Wire:
         No timeout — blocks until a full frame arrives.
         One thread per connection means frames are never interleaved.
         """
-        conn.settimeout(None)           # must be blocking for recv_framed
+        conn.settimeout(None)  # must be blocking for recv_framed
         try:
             while True:
                 msg = conn.recv(RECEIVE_SIZE)

@@ -28,7 +28,7 @@ the return value determines if the handling chain should be stopped
 """
 
 
-class FrameHandlerClass:
+class FrameHandler:
     predicate: IPFramePredicate
     handler: IPFrameHandler
 
@@ -37,11 +37,16 @@ class FrameHandlerClass:
         self.handler = handler
 
     def try_handle(
-        self, node: "Node", ip_frame: IPFrame, src_mac: MACaddr
+        self, node: Node, ip_frame: IPFrame, src_mac: MACaddr
     ) -> IPFrame | None:
-        return (self.predicate(node, ip_frame) or None) and self.handler(
-            node, ip_frame, src_mac
-        )
+        return (
+            self.predicate(node, ip_frame) and self.handler(node, ip_frame, src_mac)
+        ) or ip_frame
+
+
+class Application:
+    def handle_command(self, _: Node, *_args, **_kwargs):
+        pass
 
 
 HELP = """
@@ -64,139 +69,6 @@ FW DEFAULT ACCEPT|DROP
 """
 
 
-class MITMHandler(FrameHandlerClass):
-    """
-    Intercepts packets from victim ONLY when MITM is active,
-    logs them, then forwards them to the real destination.
-    """
-
-    victim_ip: IPaddr
-    router_ip: IPaddr
-
-    def __init__(self, victim_ip: IPaddr, router_ip: IPaddr):
-        self.victim_ip = victim_ip
-        self.router_ip = router_ip
-
-        def predicate(node: "Node", ip_frame: IPFrame) -> bool:
-
-            if not getattr(node, "_mitm_active", False):
-                return False
-
-            return ip_frame.source == victim_ip
-
-        def handler(node: "Node", ip_frame: IPFrame, _: MACaddr):
-
-            if not getattr(node, "_mitm_active", False):
-                return False
-
-            original_data = ip_frame.data
-
-            node.logger.warning(
-                f"[MITM] Intercepted packet: "
-                f"src=0x{ip_frame.source:02x} dst=0x{ip_frame.destination:02x} "
-                f"proto={IPProtocol(ip_frame.protocol).name} data={original_data}"
-            )
-
-            # =========================
-            # 🔥 ACTIVE MODE (USER INPUT)
-            # =========================
-            if getattr(node, "_mitm_mode", "passive") == "active":
-                try:
-                    decoded = original_data.decode("utf-8")
-                except:
-                    decoded = str(original_data)
-
-                print("\n=== MITM INTERCEPT ===")
-                print(f"Original message: {decoded}")
-                print("Options:")
-                print("  [1] Forward unchanged")
-                print("  [2] Modify message")
-                print("  [3] Drop packet")
-                print("\n⚠️  Press ENTER before typing your choice", flush=True)
-                choice = input("Select option: ").strip()
-
-                if choice == "2":
-                    print("\n⚠️  Press ENTER before typing modified message", flush=True)
-                    new_msg = input("Enter modified message: ")
-                    modified = new_msg.encode("utf-8")
-
-                elif choice == "3":
-                    print("[MITM] Packet dropped.")
-                    return
-
-                else:
-                    modified = original_data
-
-            else:
-                # =========================
-                # 💤 PASSIVE MODE
-                # =========================
-                modified = original_data
-
-            node.send_IP_frame(
-                ip_frame.destination,
-                ip_frame.protocol,
-                modified,
-                spoof_src=ip_frame.source,
-            )
-
-            node.logger.warning(f"[MITM] Forwarded → {modified}")
-
-        super().__init__(predicate, handler)
-
-
-class MITMARPInterceptHandler(FrameHandlerClass):
-    """
-    When sniffed: if victim sends ARP req for router,
-    N2 responds immediately so victim never hears from real router.
-    """
-
-    node: Node
-    victim_ip: IPaddr
-    router_ip: IPaddr
-
-    def __init__(self, node: Node, victim_ip: IPaddr, router_ip: IPaddr):
-        self.victim_ip = victim_ip
-        self.router_ip = router_ip
-        self.node = node
-
-        def predicate(node: "Node", f: IPFrame) -> bool:
-            return (
-                f.protocol == IPProtocol.ARP
-                and f.data == b"req"
-                and f.source == victim_ip
-                and f.destination == router_ip
-            )
-
-        def handler(node: "Node", f: IPFrame, src_mac: MACaddr):
-            node.logger.warning(
-                f"[MITM] Intercepted ARP req from 0x{f.source:02x} for 0x{f.destination:02x} — spoofing response"
-            )
-            # Reply to victim claiming we are the router
-            node.send_ARP_response(src_mac, router_ip, dst_ip=victim_ip)
-
-        super().__init__(predicate, handler)
-
-    def __del__(self):
-        self.node.logger.warning("Removing ARP intercept handler")
-        victim_mac = self.node.resolve_IP(self.victim_ip)
-        router_mac = self.node.resolve_IP(self.router_ip)
-        self.node.send_IP_frame(
-            self.router_ip,
-            IPProtocol.ARP,
-            b"res",
-            spoofed_mac=victim_mac,
-            spoof_src=self.victim_ip,
-        )
-        self.node.send_IP_frame(
-            self.victim_ip,
-            IPProtocol.ARP,
-            b"res",
-            spoofed_mac=router_mac,
-            spoof_src=self.router_ip,
-        )
-
-
 class SendMACKWargs(TypedDict, total=False):
     spoofed_mac: MACaddr | None
 
@@ -210,7 +82,8 @@ class Node:
     _socket: socket.socket
     sniffing: bool
     ip_mapping: TSDict[IPaddr, MACaddr]
-    ip_handlers: list[FrameHandlerClass]
+    ip_handlers: list[FrameHandler]
+    applications: dict[str, Application]
 
     # receiving
     def rcv_MAC_frame(self) -> None:
@@ -232,18 +105,16 @@ class Node:
 
             match frame:
                 case MACFrame(src, dst, _, bites) if dst in (self.Mac, BROADCAST_MAC):
-                    self.logger.info(
+                    self.logger.debug(
                         f"receiving [MAC] src={src} dst={dst} len={len(bites)} data={bites.hex()}"
                     )
                     self.rcv_IP_frame(bites, src)
 
                 case MACFrame(src, dst, _, data) if self.sniffing:
                     try:
-                        ip = IPFrame.from_bytes(frame.data)
                         self.logger.warning("[SNIFF] ...")
-                        for handler in self.ip_handlers:
-                            if handler.try_handle(self, ip, src):
-                                break
+                        ip = IPFrame.from_bytes(frame.data)
+                        self.handle_ip_frame(ip, src)
                     except DeserializationException:
                         self.logger.warning(
                             f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
@@ -263,19 +134,28 @@ class Node:
             )
             return
 
-        self.logger.info(
+        self.logger.debug(
             f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{
                 ip_frame.destination:02x} with protocol {
                 IPProtocol(ip_frame.protocol).name
             }"
         )
 
+        self.handle_ip_frame(ip_frame, src_mac)
+
+    def handle_ip_frame(self, ip_frame: IPFrame, src_mac: MACaddr):
+        frame: IPFrame | None = ip_frame
         for handler in self.ip_handlers:
-            if handler.try_handle(self, ip_frame, src_mac):
+            frame = handler.try_handle(self, frame, src_mac)
+            if not frame:
                 return
 
-    def add_handler(self, handler_class: FrameHandlerClass):
+    def add_handler(self, handler_class: FrameHandler):
         self.ip_handlers.append(handler_class)
+        return self
+
+    def add_application(self, name: str, application: Application):
+        self.applications[name] = application
         return self
 
     def ddos(self, target_ip: IPaddr):
@@ -423,7 +303,7 @@ class Node:
         self, dst: MACaddr, data: bytes, **kwargs: Unpack[SendMACKWargs]
     ):
         spoofed_mac = kwargs.get("spoofed_mac") or self.Mac
-        self.logger.info(
+        self.logger.debug(
             f"sending [MAC] src={spoofed_mac} dst={dst} len={len(data)} data={data.hex()}"
         )
         self._socket.sendall(bytes(MACFrame(spoofed_mac, dst, data)))
@@ -441,7 +321,7 @@ class Node:
         else:
             spoof_src = self.Ip
 
-        self.logger.info(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
+        self.logger.debug(f"sending {data} from 0x{self.Ip:02x} to 0x{dst:02x}")
 
         resolved_mac = self.resolve_IP(dst)
 
@@ -514,54 +394,13 @@ class Node:
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
 
                 case ["MITM", "STOP"]:
-                    self._mitm_active = False
-                    self.sniffing = False
-                    self.ip_handlers = [
-                        h
-                        for h in self.ip_handlers
-                        if h.__class__.__name__
-                        not in ["MITMHandler", "MITMARPInterceptHandler"]
-                    ]
-
-                case ["MITM", "MODE", mode]:
-                    if mode.lower() in ["active", "passive"]:
-                        self._mitm_mode = mode.lower()
-                        print(f"[MITM] Mode set to {self._mitm_mode.upper()}")
-                    else:
-                        print("Usage: MITM MODE active|passive")
+                    self.applications["mitm"].handle_command(self, "stop")
 
                 case ["MITM", victim_ip_hex, router_ip_hex]:
                     victim_ip = int(victim_ip_hex, base=16)
                     router_ip = int(router_ip_hex, base=16)
 
-                    self._mitm_active = True
-
-                    victim_mac = self.resolve_IP(victim_ip)
-                    router_mac = self.resolve_IP(router_ip)
-
-                    self.sniffing = True
-
-                    if not any(
-                        h.__class__.__name__ == "MITMARPInterceptHandler"
-                        for h in self.ip_handlers
-                    ):
-                        self.add_handler(
-                            MITMARPInterceptHandler(self, victim_ip, router_ip)
-                        )
-
-                    if not any(
-                        h.__class__.__name__ == "MITMHandler" for h in self.ip_handlers
-                    ):
-                        self.add_handler(MITMHandler(victim_ip, router_ip))
-
-                    def poison_loop():
-                        while getattr(self, "_mitm_active", False):
-                            self.send_ARP_response(victim_mac, router_ip, victim_ip)
-                            self.send_ARP_response(router_mac, victim_ip, router_ip)
-                            time.sleep(2)
-
-                    Thread(target=poison_loop, daemon=True).start()
-
+                    self.applications["mitm"].handle_command(self, victim_ip, router_ip)
                     self.logger.warning(
                         f"[MITM] Attack started against 0x{victim_ip:02x}"
                     )
@@ -699,7 +538,7 @@ class Node:
                         )
                     print(f"  TOTAL: {threading.active_count()}")
 
-                case _:
+                case ["HELP"] | ["?"]:
                     print(HELP)
 
     @override
@@ -714,6 +553,7 @@ class Node:
         self.ip_mapping = TSDict()
         self.ip_mapping[self.Ip] = self.Mac
         self.ip_handlers = []
+        self.applications = {}
         self._ddos_stop: Event | None = None
         self._mitm_mode = "passive"
         self._mitm_active = False
