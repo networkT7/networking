@@ -32,6 +32,9 @@ class Router:
         # DDoS detection: src_ip → list of packet timestamps
         self._pkt_times: dict[int, list[float]] = defaultdict(list)
         self._pkt_lock = Lock()
+        self._ddos_last_alert: dict[int, float] = {}
+        self._ddos_alert_lock = Lock()
+        self._ddos_alert_interval = 5.0  # only re-alert every 5 seconds per src_ip
 
         interfaces: dict[str, Node] = {}
         forward_handler = FrameHandler(
@@ -74,26 +77,31 @@ class Router:
                 self.logger.critical(
                     f"[ROUTER IDS] ⚠ IP SPOOFING DETECTED: "
                     f"IP 0x{src_ip:02x} known from MAC '{known_mac}', "
-                    f"arrived from '{src_mac}' — packet DROPPED before forwarding"
+                    f"arrived from '{src_mac}' - POSSIBLE SPOOF"
                 )
-                return  # drop — never reaches forward()
 
-        # --- DDoS: sliding window rate check ---
+        # --- DDoS: sliding window rate check (track by dst_ip for volumetric detection) ---
+        dst_ip = ip_frame.destination
         now = time.monotonic()
         with self._pkt_lock:
-            times = self._pkt_times[src_ip]
-            self._pkt_times[src_ip] = [t for t in times if now - t < RATE_WINDOW]
-            self._pkt_times[src_ip].append(now)
-            count = len(self._pkt_times[src_ip])
+            times = self._pkt_times[dst_ip]
+            self._pkt_times[dst_ip] = [t for t in times if now - t < RATE_WINDOW]
+            self._pkt_times[dst_ip].append(now)
+            count = len(self._pkt_times[dst_ip])
 
         if count >= RATE_THRESHOLD:
-            self.logger.critical(
-                f"[ROUTER IDS] ⚠ DDoS DETECTED: "
-                f"0x{src_ip:02x} sent {count} packets in {RATE_WINDOW}s — packet DROPPED"
-            )
-            return  # drop flood packets
-
-        return ip_frame  # clean — pass to forward()
+            with self._ddos_alert_lock:
+                last = self._ddos_last_alert.get(dst_ip, 0.0)
+                if now - last >= self._ddos_alert_interval:
+                    self._ddos_last_alert[dst_ip] = now
+                    msg = (
+                        f"[ROUTER IDS] ⚠ DDoS DETECTED: "
+                        f"0x{dst_ip:02x} received {count} packets in {RATE_WINDOW}s "
+                        f"from multiple sources — POSSIBLE DDoS"
+                    )
+                    self.logger.critical(msg)
+                    print(f"\n{'='*55}\n{msg}\n{'='*55}\n", flush=True)
+        return ip_frame 
 
     def forward(self, _n: Node, ip_frame: IPFrame, _mac: MACaddr) -> IPFrame | None:
         dst_ip = ip_frame.destination
