@@ -18,8 +18,6 @@ class Wire:
             targets = list(self.__targets)
         logger.info(f"broadcasting {len(msg)} bytes to {len(targets) - 1} peer(s)")
         for sock in targets:
-            if sock is sender:
-                continue
             try:
                 sock.sendall(msg)
             except OSError as e:

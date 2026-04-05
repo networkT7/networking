@@ -231,6 +231,7 @@ class Node:
                     msg = " ".join(msg)
                     if not msg:
                         print("Message cannot be empty")
+                        continue
 
                     self.send_IP_frame(
                         int(dst, base=16),
@@ -243,10 +244,7 @@ class Node:
                         int(dst, base=16), IPProtocol.PING, PayloadType.REQ
                     )
 
-                case [
-                    "CONNECT",
-                    dst,
-                ]:  # ← [CONNECT] sends SYN; reply logged by TCPConnectResponseHandler
+                case ["CONNECT", dst]:
                     self.applications["tcp"].handle_command(self, dst)
 
                 case ["SPOOF", fake_src, dst, *msg]:
