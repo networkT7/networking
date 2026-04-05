@@ -13,20 +13,20 @@ class MITMHandler(FrameHandler):
     logs them, then forwards them to the real destination.
     """
 
-    application: MITMApplication
+    app: MITMApplication
 
-    def __init__(self, application: MITMApplication):
-        self.application = application
+    def __init__(self, app: MITMApplication):
+        self.app = app
 
         def predicate(_node: Node, _ip_frame: IPFrame) -> bool:
             if _ip_frame.protocol == IPProtocol.ARP:
                 return False
 
-            if not self.application.victim_router_pair:
+            if not app.victim_router_pair:
                 return False
 
             condition = any(
-                ip in self.application.victim_router_pair
+                ip in app.victim_router_pair
                 for ip in (_ip_frame.source, _ip_frame.destination)
             )
             return condition

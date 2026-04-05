@@ -1,10 +1,8 @@
 from abc import ABC, abstractmethod
 from logging import Logger
 import socket
-import time
-from threading import Event, Thread
+from threading import Thread
 from typing import Callable, SupportsBytes, TypedDict, Unpack, override
-from random import randint
 from networking.firewall import Firewall, FirewallRule, FirewallAction
 from networking.collections.ts_dict import TSDict
 from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
@@ -73,7 +71,7 @@ FW DEFAULT ACCEPT|DROP
 
 
 class SendMACKWargs(TypedDict, total=False):
-    spoofed_mac: MACaddr | None
+    spoofed_mac: MACaddr
 
 
 class Node:

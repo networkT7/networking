@@ -3,6 +3,7 @@ from random import randint
 from threading import Event, Thread
 import time
 from typing import Callable, Literal, override
+from networking.applications.tcp import TCPState
 from networking.components.node import Application, Node
 from networking.types import IPProtocol, IPaddr
 
@@ -99,7 +100,9 @@ class DDOSApplication(Application):
                 self.logger.warning("[SLOWLORIS] Stopped during Phase 1.")
                 return
 
-            node.send_IP_frame(target_ip, IPProtocol.TCP, b"SYN", spoof_src=spoofed_ip)
+            node.send_IP_frame(
+                target_ip, IPProtocol.TCP, TCPState.SYN, spoof_src=spoofed_ip
+            )
             self.logger.warning(f"[SLOWLORIS] Phase 1: SYN sent ({i + 1}/{len(pool)})")
             time.sleep(0.2)
 
@@ -119,7 +122,7 @@ class DDOSApplication(Application):
                 if e.is_set():
                     break
                 node.send_IP_frame(
-                    target_ip, IPProtocol.TCP, b"KEEPALIVE", spoof_src=spoofed_ip
+                    target_ip, IPProtocol.TCP, TCPState.KEEPALIVE, spoof_src=spoofed_ip
                 )
                 time.sleep(keepalive_sleep)
 

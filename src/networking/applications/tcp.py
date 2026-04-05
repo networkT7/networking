@@ -16,25 +16,25 @@ class TCPState(BytesEnum):
 
 
 class TCPHandler(FrameHandler):
-    application: TCPApplication
+    app: TCPApplication
 
     def __init__(self, application: TCPApplication):
-        self.application = application
+        self.app = application
         super().__init__(
             lambda node, f: f.protocol == IPProtocol.TCP and node.Ip == f.destination,
             self.on_request,
         )
 
     def on_request(self, node: Node, frame: IPFrame, _: MACaddr):
-        app = self.application
+        app = self.app
 
+        app.cleanup_stale_connections()
         with app.conn_lock:
-            app.cleanup_stale_connections()
             src = frame.source
             table_has_src = src in app.conn_table
 
             now = time.monotonic()
-            reply = None  # ← [CONNECT] will be set to SYN-ACK or RST for SYN frames
+            reply: TCPState | None = None
             try:
                 payload = frame.data
                 match TCPState(payload):
@@ -44,13 +44,17 @@ class TCPHandler(FrameHandler):
                             app.logger.info(
                                 f"[TCP] Duplicate SYN from 0x{src:02x}, refreshed"
                             )
-                            reply = b"SYN-ACK"  #  re-acknowledge existing connection
+                            reply = (
+                                TCPState.SYNACK
+                            )  #  re-acknowledge existing connection
                         elif len(app.conn_table) >= app.max_connections:
                             app.logger.warning(
                                 f"[TCP] Connection limit reached ({app.max_connections}), "
                                 + f"dropping SYN from 0x{src:02x}"
                             )
-                            reply = b"RST"  #  table full — tell sender to back off
+                            reply = (
+                                TCPState.RST
+                            )  #  table full — tell sender to back off
                         else:
                             app.conn_table[src] = {
                                 "state": "HALF_OPEN",
@@ -61,7 +65,7 @@ class TCPHandler(FrameHandler):
                                 f"[TCP] Connection {count}/{app.max_connections} "
                                 + f"from 0x{src:02x} (HALF_OPEN)"
                             )
-                            reply = b"SYN-ACK"  # ← [CONNECT] connection accepted
+                            reply = TCPState.SYNACK  # ← [CONNECT] connection accepted
 
                     case TCPState.KEEPALIVE:
                         if table_has_src:
@@ -84,7 +88,7 @@ class TCPHandler(FrameHandler):
                             f"[TCP] CONNECT to 0x{src:02x} REFUSED — table full"
                         )
                 # ← [CONNECT] send reply outside the lock to avoid holding it during ARP resolution
-                if reply:
+                if reply is not None:
                     try:
                         node.send_IP_frame(src, IPProtocol.TCP, reply)
                     except TimeoutError:
@@ -129,8 +133,8 @@ class TCPApplication(Application):
 
     def stats(self):
         print("\n=== TRAFFIC STATS ===")
+        self.cleanup_stale_connections()
         with self.conn_lock:
-            self.cleanup_stale_connections()
             total = len(self.conn_table)
             half_open = sum(
                 1 for v in self.conn_table.values() if v["state"] == "HALF_OPEN"
@@ -146,13 +150,14 @@ class TCPApplication(Application):
                 print(f"  0x{ip:02x}: {info['state']}  (last activity: {age:.1f}s ago)")
 
     def cleanup_stale_connections(self):
-        """Remove connections that have timed out. Must be called with _conn_lock held."""
-        now = time.monotonic()
-        stale = [
-            ip
-            for ip, info in self.conn_table.items()
-            if now - info["last_activity"] > self.conn_timeout
-        ]
-        for ip in stale:
-            del self.conn_table[ip]
-            self.logger.debug(f"[TCP] Connection from 0x{ip:02x} timed out")
+        """Remove connections that have timed out."""
+        with self.conn_lock:
+            now = time.monotonic()
+            stale = [
+                ip
+                for ip, info in self.conn_table.items()
+                if now - info["last_activity"] > self.conn_timeout
+            ]
+            for ip in stale:
+                del self.conn_table[ip]
+                self.logger.debug(f"[TCP] Connection from 0x{ip:02x} timed out")
