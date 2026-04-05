@@ -6,6 +6,7 @@ from networking.applications.tcp import TCPApplication
 from networking.components.handlers import (
     ARPHandler,
     DataHandler,
+    IPFragmentHandler,
     PingHandler,
 )
 from networking.config import config
@@ -58,6 +59,7 @@ match argv:
         n = Node(c, wire)
         (
             n.add_handler(ids.handler)
+            .add_handler(IPFragmentHandler())
             .add_handler(ARPHandler())
             .add_handler(PingHandler())
             .add_handler(DataHandler())

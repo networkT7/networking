@@ -43,7 +43,7 @@ class MACFrame:
             raise DeserializationException("data is not a valid MAC frame")
 
         data = arr[5:]
-        data_len = arr[4]
+        data_len = arr[4] + 1
         actual_len = len(data)
         if data_len != actual_len:
             raise DeserializationException(
@@ -87,7 +87,7 @@ class MACFrame:
 
         self.__src = src
         self.__dst = dst
-        self.__length = length
+        self.__length = length - 1
         self.__data = data
 
     def __len__(self):
@@ -141,7 +141,7 @@ class IPFrame:
             raise DeserializationException("not a valid IP protocol")
 
         data = arr[5:]
-        data_len = arr[3]
+        data_len = arr[3] + 1
         fragment_info = arr[4]
         actual_len = len(data)
         if data_len != actual_len:
@@ -258,7 +258,7 @@ class IPFrame:
         self.__dst = dst
         self.__protocol = protocol
         self.__fragment_info = fragment_info
-        self.__length = length
+        self.__length = length - 1
         self.__data = data
 
     def __len__(self):

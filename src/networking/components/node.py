@@ -231,10 +231,14 @@ class Node:
             data = input("> ")
             match data.split():
                 case ["SEND", dst, *msg]:
+                    msg = " ".join(msg)
+                    if not msg:
+                        print("Message cannot be empty")
+
                     self.send_IP_frame(
                         int(dst, base=16),
                         IPProtocol.DATA,
-                        " ".join(msg).encode(BYTE_ENCODING_TYPE),
+                        msg.encode(BYTE_ENCODING_TYPE),
                     )
 
                 case ["PING", dst]:
