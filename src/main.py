@@ -52,8 +52,12 @@ match argv:
         from networking.ids import IDS
         from networking.log_format import create_logger
         from networking.config import LOGGING_LEVEL
+        router_macs = {
+            iface["MAC"]
+            for iface in config["routers"]["interfaces"].values()
+        }
 
-        ids = IDS(create_logger(f"IDS-{node_name}", level=LOGGING_LEVEL))
+        ids = IDS(create_logger(f"IDS-{node_name}", level=LOGGING_LEVEL), trusted_macs=router_macs)
         ids.seed(c["IP"], c["MAC"])
 
         n = Node(c, wire)
@@ -70,7 +74,9 @@ match argv:
         )
 
     case [_, "router"]:
-        _ = Router(config["routers"], config["wires"])
+        Router(config["routers"], config["wires"])
+        import signal
+        signal.pause()
 
     case _:
         usage()

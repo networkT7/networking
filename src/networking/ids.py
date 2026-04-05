@@ -28,28 +28,21 @@ class IDS:
     automatically inserts a DROP rule for the offending src_ip.
     """
 
-    def __init__(self, logger: Logger):
+    def __init__(self, logger: Logger, trusted_macs: set[MACaddr] | None = None):
         self._logger = logger
-
-        # DDoS tracking: src_ip → list of packet arrival timestamps
         self._pkt_times: dict[IPaddr, list[float]] = defaultdict(list)
         self._pkt_lock = Lock()
-
-        # IP→MAC trust table: src_ip → first-seen MAC (seeded from ARP + DATA/PING)
         self._arp_table: dict[IPaddr, MACaddr] = {}
         self._arp_lock = Lock()
-
-        # Track which src_ips we've already blocked to avoid duplicate rules
         self._blocked: set[IPaddr] = set()
         self._blocked_lock = Lock()
         self._spoof_counts: dict[IPaddr, int] = defaultdict(int)
         self._spoof_lock = Lock()
-
+        self._trusted_macs: set[MACaddr] = trusted_macs or set()
         self.handler = FrameHandler(
             lambda _node, _frame: True,
             self._inspect,
         )
-
     # ------------------------------------------------------------------
     # Main inspection entry point
     # ------------------------------------------------------------------
@@ -145,14 +138,14 @@ class IDS:
         trusted MAC so repeated spoofed packets keep triggering alerts.
         """
         if ip_frame.protocol == IPProtocol.ARP:
-            return  # handled by _check_arp_spoof
-
+            return 
+        if src_mac in self._trusted_macs: 
+            return
         src_ip = ip_frame.source
 
         with self._arp_lock:
             known_mac = self._arp_table.get(src_ip)
             if known_mac is None:
-                # First time seeing this IP — learn and allow
                 self._arp_table[src_ip] = src_mac
                 self._logger.debug(
                     f"[IDS] Learned DATA/PING: 0x{src_ip:02x} → '{src_mac}'"
@@ -165,8 +158,6 @@ class IDS:
                     f"IP 0x{src_ip:02x} known from MAC '{known_mac}', "
                     f"but packet arrived from MAC '{src_mac}' — possible MITM/spoof!"
                 )
-                # ← Do NOT overwrite known_mac here — preserve the trusted entry
-                #   so repeated spoofed packets from the same forged IP keep alerting
                 self._block(node, src_ip, reason="IP spoofing")
 
     # ------------------------------------------------------------------
