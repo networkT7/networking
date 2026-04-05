@@ -19,6 +19,10 @@ class DDOSApplication(Application):
     def __init__(self, node: Node) -> None:
         self.logger = node.logger
         self.attack_events = {k: Event() for k in _ATTACKS}
+
+        for e in self.attack_events.values():
+            e.set()
+
         self.attack_func = {
             "DDOS": self.ddos,
             "SLOWLORIS": self.slowloris,
@@ -28,7 +32,7 @@ class DDOSApplication(Application):
 
     @override
     def handle_command(self, node: Node, *args: str):
-        if args[0] == "stats":
+        if args[0] == "STATS":
             attacks = [k for (k, v) in self.attack_events.items() if not v.is_set()]
             print(f"Active attacks: {', '.join(attacks) if attacks else 'none'}")
             return
@@ -39,7 +43,7 @@ class DDOSApplication(Application):
 
         e = self.attack_events[attack]
         if target == "STOP":
-            if e.is_set():
+            if not e.is_set():
                 e.set()
                 print(f"[{attack}] Stopping attack...")
             else:

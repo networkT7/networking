@@ -68,8 +68,7 @@ match argv:
         )
 
     case [_, "router"]:
-        Router(config["routers"], config["wires"])
-        input("Router running... Press Enter to exit.\n")
+        _ = Router(config["routers"], config["wires"])
 
     case _:
         usage()

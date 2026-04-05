@@ -124,7 +124,7 @@ class TCPApplication(Application):
     @override
     def handle_command(self, node: Node, *args: str):
         match args:
-            case ("stats",):
+            case ("STATS",):
                 self.stats()
             case (dst,):
                 node.send_IP_frame(int(dst, base=16), IPProtocol.TCP, TCPState.SYN)

@@ -86,7 +86,7 @@ class MITMApplication(Application):
     @override
     def handle_command(self, node: Node, *args: str):
         match args:
-            case ("stop",):
+            case ("STOP",):
                 if not self.victim_router_pair:
                     return
                 victim_ip, router_ip = self.victim_router_pair

@@ -40,8 +40,10 @@ class FrameHandler:
         self, node: Node, ip_frame: IPFrame, src_mac: MACaddr
     ) -> IPFrame | None:
         return (
-            self.predicate(node, ip_frame) and self.handler(node, ip_frame, src_mac)
-        ) or ip_frame
+            self.handler(node, ip_frame, src_mac)
+            if self.predicate(node, ip_frame)
+            else ip_frame
+        )
 
 
 class Application(ABC):
@@ -270,8 +272,8 @@ class Node:
 
                 case ["STATS"]:
                     print("\n=== TRAFFIC STATS ===")
-                    self.applications["tcp"].handle_command(self, "stats")
-                    self.applications["ddos"].handle_command(self, "stats")
+                    self.applications["tcp"].handle_command(self, "STATS")
+                    self.applications["ddos"].handle_command(self, "STATS")
                     print("====================\n")
 
                 case ["ARP"]:

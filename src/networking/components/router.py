@@ -54,7 +54,7 @@ class Router:
             k: interfaces[v] for k, v in config["routing_table"].items()
         }
 
-        Thread(target=self._control_loop, daemon=True).start()
+        self._control_loop()
 
     def _ids_inspect(
         self, _n: Node, ip_frame: IPFrame, src_mac: MACaddr
@@ -125,8 +125,12 @@ class Router:
                     self.ids_enabled = True
                     print("[ROUTER] IDS enabled")
 
+                elif cmd == "EXIT" or cmd == "exit":
+                    print("Exiting...")
+                    return
+
                 else:
-                    print("Commands: IDS ON / IDS OFF")
+                    print("Commands: IDS ON / IDS OFF / EXIT")
 
             except Exception as e:
                 print(f"[ROUTER] Error: {e}")
