@@ -1,12 +1,12 @@
 from sys import argv, executable
 
-from networking.components.applications import MITMApplication, MITMHandler
+from networking.applications.ddos import DDOSApplication
+from networking.applications.mitm import MITMApplication
+from networking.applications.tcp import TCPApplication
 from networking.components.handlers import (
     ARPHandler,
     DataHandler,
     PingHandler,
-    TCPConnectionHandler,
-    TCPConnectResponseHandler,  # ← [CONNECT]
 )
 from networking.config import config
 from networking.components.node import Node
@@ -55,18 +55,17 @@ match argv:
         ids = IDS(create_logger(f"IDS-{node_name}", level=LOGGING_LEVEL))
         ids.seed(c["IP"], c["MAC"])
 
-        n = (
-            Node(c, wire)
-            .add_handler(ids.handler)
+        n = Node(c, wire)
+        (
+            n.add_handler(ids.handler)
             .add_handler(ARPHandler())
             .add_handler(PingHandler())
-            .add_handler(
-                TCPConnectResponseHandler()
-            )  # ← [CONNECT] before TCPConnectionHandler so SYN-ACK/RST are caught first
-            .add_handler(TCPConnectionHandler())
             .add_handler(DataHandler())
+            .add_application("mitm", MITMApplication(n))
+            .add_application("tcp", TCPApplication(n))
+            .add_application("ddos", DDOSApplication(n))
+            .input()
         )
-        n.add_application("mitm", MITMApplication(n)).input()
 
     case [_, "router"]:
         Router(config["routers"], config["wires"])

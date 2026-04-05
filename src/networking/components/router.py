@@ -100,7 +100,7 @@ class Router:
 
         if dst_ip not in self.routing_table:
             self.logger.warning(f"No route for 0x{dst_ip:02x}")
-            return ip_frame
+            return
 
         n = self.routing_table[dst_ip]
         try:
@@ -109,9 +109,8 @@ class Router:
             self.logger.warning(
                 f"ARP timeout resolving 0x{dst_ip:02x} — dropping packet"
             )
-            return ip_frame
+            return
         self.logger.info(f"Forwarded packet to 0x{dst_ip:02x} via {n.Mac}")
-        return
 
     def _control_loop(self):
         while True:

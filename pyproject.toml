@@ -11,3 +11,4 @@ dependencies = [
 [tool.pyright]
 reportUnusedCallResult = "information"
 reportUnnecessaryIsInstance = "information"
+reportAny = "information"

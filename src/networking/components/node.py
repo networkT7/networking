@@ -1,9 +1,10 @@
+from abc import ABC, abstractmethod
 from logging import Logger
-import socket, time
-from threading import Thread, Lock
-from typing import Callable, TypedDict, Unpack, override
+import socket
+import time
+from threading import Event, Thread
+from typing import Callable, SupportsBytes, TypedDict, Unpack, override
 from random import randint
-from threading import Event
 from networking.firewall import Firewall, FirewallRule, FirewallAction
 from networking.collections.ts_dict import TSDict
 from networking.config import HOSTNAME, LOGGING_LEVEL, RECEIVE_SIZE
@@ -15,6 +16,7 @@ from networking.types import (
     IPaddr,
     IPProtocol,
     NodeConfig,
+    PayloadType,
     WireConfig,
 )
 
@@ -44,8 +46,9 @@ class FrameHandler:
         ) or ip_frame
 
 
-class Application:
-    def handle_command(self, _: Node, *_args, **_kwargs):
+class Application(ABC):
+    @abstractmethod
+    def handle_command(self, _node: Node, *_args: str):
         pass
 
 
@@ -119,6 +122,8 @@ class Node:
                         self.logger.warning(
                             f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
                         )
+                case _:
+                    pass
 
     def rcv_IP_frame(self, byte_arr: bytes, src_mac: MACaddr):
         try:
@@ -158,146 +163,6 @@ class Node:
         self.applications[name] = application
         return self
 
-    def ddos(self, target_ip: IPaddr):
-        self.logger.warning(f"[DDOS] Starting DDoS on 0x{target_ip:02x}")
-
-        if self._ddos_stop is None:
-            self._ddos_stop = Event()
-        else:
-            self._ddos_stop.clear()
-
-        total_sent = 0
-        while True:
-            if self._ddos_stop.is_set():
-                print(
-                    f"\r[DDOS] Stopped. Total packets sent: {total_sent:<8}", flush=True
-                )
-                self.logger.warning("[DDOS] Stopped.")
-                break
-
-            fake_src = randint(0x01, 0xFE)
-
-            self.send_IP_frame(
-                target_ip,
-                IPProtocol.DATA,
-                b"flood",
-                spoof_src=fake_src,
-            )
-
-            total_sent += 1
-            print(
-                f"\r[DDOS] Flooding 0x{target_ip:02x} | pkts: {total_sent:<6} | src: 0x{fake_src:02x} (random)",
-                end="",
-                flush=True,
-            )
-            time.sleep(0.01)  # controls speed (don’t remove)
-
-    def _cleanup_stale_connections(self):
-        """Remove connections that have timed out. Must be called with _conn_lock held."""
-        now = time.monotonic()
-        stale = [
-            ip
-            for ip, info in self._conn_table.items()
-            if now - info["last_activity"] > self._conn_timeout
-        ]
-        for ip in stale:
-            del self._conn_table[ip]
-            self.logger.debug(f"[TCP] Connection from 0x{ip:02x} timed out")
-
-    def slowloris(self, target_ip: IPaddr):
-        self.logger.warning(f"[SLOWLORIS] Starting Slowloris on 0x{target_ip:02x}")
-
-        if self._slowloris_stop is None:
-            self._slowloris_stop = Event()
-        else:
-            self._slowloris_stop.clear()
-
-        # Phase 1: Open connections with spoofed IPs
-        # 12 IPs > max_connections (10), so last 2 get dropped — demonstrates exhaustion
-        # Pool is offset by node IP so concurrent attackers don't share spoofed IPs
-        # (shared IPs trigger the router's DAI and get dropped)
-        base = (self.Ip & 0x0F) * 12
-        pool = [(0x80 + base + i) & 0xFF for i in range(12)]  # 12 spoofed source IPs
-        self.logger.warning(f"[SLOWLORIS] Phase 1: Opening {len(pool)} connections...")
-
-        for i, spoofed_ip in enumerate(pool):
-            if self._slowloris_stop.is_set():
-                self.logger.warning("[SLOWLORIS] Stopped during Phase 1.")
-                return
-
-            self.send_IP_frame(target_ip, IPProtocol.TCP, b"SYN", spoof_src=spoofed_ip)
-            self.logger.warning(f"[SLOWLORIS] Phase 1: SYN sent ({i + 1}/{len(pool)})")
-            time.sleep(0.2)
-
-        # Phase 2: Hold connections open with keepalives
-        # Cycle must complete within _conn_timeout (10s).
-        # 12 IPs x 0.5s = 6s per cycle — safely under 10s timeout.
-        keepalive_sleep = 0.5
-        cycle_time = len(pool) * keepalive_sleep
-        self.logger.warning(
-            f"[SLOWLORIS] Phase 2: Holding connections, "
-            f"cycle every {cycle_time:.0f}s, ~{1 / keepalive_sleep:.0f} pps"
-        )
-
-        cycle_count = 0
-        while not self._slowloris_stop.is_set():
-            for spoofed_ip in pool:
-                if self._slowloris_stop.is_set():
-                    break
-                self.send_IP_frame(
-                    target_ip, IPProtocol.TCP, b"KEEPALIVE", spoof_src=spoofed_ip
-                )
-                time.sleep(keepalive_sleep)
-
-            cycle_count += 1
-            self.logger.warning(
-                f"[SLOWLORIS] Status: keepalive cycle {cycle_count} complete "
-                f"({len(pool)} connections maintained)"
-            )
-
-        self.logger.warning("[SLOWLORIS] Stopped.")
-
-    def rddos(self, target_ip: IPaddr):
-        self.logger.warning(
-            f"[RDDOS] Starting rotating source DDoS on 0x{target_ip:02x}"
-        )
-
-        if self._rddos_stop is None:
-            self._rddos_stop = Event()
-        else:
-            self._rddos_stop.clear()
-
-        pool = list(range(0xC0, 0xD4))  # 20 spoofed source IPs
-        self.logger.warning(
-            f"[RDDOS] Using {len(pool)} rotating sources, "
-            f"~{1000 / 5:.0f} pps aggregate, "
-            f"~{1000 / (5 * len(pool)):.0f} pps per source"
-        )
-
-        total_sent = 0
-        idx = 0
-
-        while not self._rddos_stop.is_set():
-            spoofed_ip = pool[idx % len(pool)]
-            self.send_IP_frame(
-                target_ip, IPProtocol.DATA, b"flood", spoof_src=spoofed_ip
-            )
-            total_sent += 1
-            idx += 1
-
-            bar_filled = idx % len(pool)
-            bar = "#" * bar_filled + "." * (len(pool) - bar_filled)
-            print(
-                f"\r[RDDOS] [{bar}] pkts: {total_sent:<6} | src: 0x{spoofed_ip:02x} | ~200 pps",
-                end="",
-                flush=True,
-            )
-
-            time.sleep(0.005)
-
-        print(f"\r[RDDOS] Stopped. Total packets sent: {total_sent:<8}", flush=True)
-        self.logger.warning(f"[RDDOS] Stopped. Total packets sent: {total_sent}")
-
     # sending
     def send_MAC_frame(
         self, dst: MACaddr, data: bytes, **kwargs: Unpack[SendMACKWargs]
@@ -312,7 +177,7 @@ class Node:
         self,
         dst: IPaddr,
         protocol: IPProtocol,
-        data: bytes,
+        data: SupportsBytes,
         spoof_src: IPaddr | None = None,
         **kwargs: Unpack[SendMACKWargs],
     ):
@@ -335,13 +200,13 @@ class Node:
     def send_ARP_request(self, dst: IPaddr):
         self.send_MAC_frame(
             BROADCAST_MAC,
-            bytes(IPFrame(self.Ip, dst, IPProtocol.ARP, b"req")),
+            bytes(IPFrame(self.Ip, dst, IPProtocol.ARP, PayloadType.REQ)),
         )
 
     def send_ARP_response(self, dst_mac: MACaddr, claimed_ip: IPaddr, dst_ip: IPaddr):
         self.send_MAC_frame(
             dst_mac,
-            bytes(IPFrame(claimed_ip, dst_ip, IPProtocol.ARP, b"res")),
+            bytes(IPFrame(claimed_ip, dst_ip, IPProtocol.ARP, PayloadType.RES)),
         )
 
     def resolve_IP(self, dst: IPaddr) -> MACaddr:
@@ -373,13 +238,15 @@ class Node:
                     )
 
                 case ["PING", dst]:
-                    self.send_IP_frame(int(dst, base=16), IPProtocol.PING, b"req")
+                    self.send_IP_frame(
+                        int(dst, base=16), IPProtocol.PING, PayloadType.REQ
+                    )
 
                 case [
                     "CONNECT",
                     dst,
                 ]:  # ← [CONNECT] sends SYN; reply logged by TCPConnectResponseHandler
-                    self.send_IP_frame(int(dst, base=16), IPProtocol.TCP, b"SYN")
+                    self.applications["tcp"].handle_command(self, dst)
 
                 case ["SPOOF", fake_src, dst, *msg]:
                     self.send_IP_frame(
@@ -393,87 +260,20 @@ class Node:
                     self.sniffing = True if mode.lower() == "on" else False
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
 
-                case ["MITM", "STOP"]:
-                    self.applications["mitm"].handle_command(self, "stop")
+                case ["MITM", *args]:
+                    self.applications["mitm"].handle_command(self, *args)
 
-                case ["MITM", victim_ip_hex, router_ip_hex]:
-                    victim_ip = int(victim_ip_hex, base=16)
-                    router_ip = int(router_ip_hex, base=16)
-
-                    self.applications["mitm"].handle_command(self, victim_ip, router_ip)
-                    self.logger.warning(
-                        f"[MITM] Attack started against 0x{victim_ip:02x}"
-                    )
-
-                case ["DDOS", "STOP"]:
-                    if self._ddos_stop is not None and not self._ddos_stop.is_set():
-                        self._ddos_stop.set()
-                        print("[DDOS] Stopping attack...")
-                    else:
-                        print("[DDOS] No active DDoS attack.")
-                case ["DDOS", target_ip_hex]:
-                    target_ip = int(target_ip_hex, base=16)
-                    Thread(target=self.ddos, args=(target_ip,), daemon=True).start()
-
-                case ["SLOWLORIS", "STOP"]:
-                    if (
-                        self._slowloris_stop is not None
-                        and not self._slowloris_stop.is_set()
-                    ):
-                        self._slowloris_stop.set()
-                        print("[SLOWLORIS] Stopping attack...")
-                    else:
-                        print("[SLOWLORIS] No active Slowloris attack.")
-                case ["SLOWLORIS", target_ip_hex]:
-                    target_ip = int(target_ip_hex, base=16)
-                    Thread(
-                        target=self.slowloris, args=(target_ip,), daemon=True
-                    ).start()
-
-                case ["RDDOS", "STOP"]:
-                    if self._rddos_stop is not None and not self._rddos_stop.is_set():
-                        self._rddos_stop.set()
-                        print("[RDDOS] Stopping attack...")
-                    else:
-                        print("[RDDOS] No active rotating DDoS attack.")
-                case ["RDDOS", target_ip_hex]:
-                    target_ip = int(target_ip_hex, base=16)
-                    Thread(target=self.rddos, args=(target_ip,), daemon=True).start()
+                case [ddos_attack, action] if ddos_attack in (
+                    "DDOS",
+                    "SLOWLORIS",
+                    "RDDOS",
+                ):
+                    self.applications["ddos"].handle_command(self, ddos_attack, action)
 
                 case ["STATS"]:
                     print("\n=== TRAFFIC STATS ===")
-                    with self._conn_lock:
-                        self._cleanup_stale_connections()
-                        total = len(self._conn_table)
-                        half_open = sum(
-                            1
-                            for v in self._conn_table.values()
-                            if v["state"] == "HALF_OPEN"
-                        )
-                        established = total - half_open
-                        print(
-                            f"Connections: {total}/{self._max_connections} used "
-                            f"({half_open} HALF_OPEN, {established} ESTABLISHED)"
-                        )
-                        now = time.monotonic()
-                        for ip, info in self._conn_table.items():
-                            age = now - info["last_activity"]
-                            print(
-                                f"  0x{ip:02x}: {info['state']}  (last activity: {age:.1f}s ago)"
-                            )
-                    attacks = []
-                    if self._ddos_stop is not None and not self._ddos_stop.is_set():
-                        attacks.append("DDOS")
-                    if (
-                        self._slowloris_stop is not None
-                        and not self._slowloris_stop.is_set()
-                    ):
-                        attacks.append("SLOWLORIS")
-                    if self._rddos_stop is not None and not self._rddos_stop.is_set():
-                        attacks.append("RDDOS")
-                    print(
-                        f"Active attacks: {', '.join(attacks) if attacks else 'none'}"
-                    )
+                    self.applications["tcp"].handle_command(self, "stats")
+                    self.applications["ddos"].handle_command(self, "stats")
                     print("====================\n")
 
                 case ["ARP"]:
@@ -540,6 +340,8 @@ class Node:
 
                 case ["HELP"] | ["?"]:
                     print(HELP)
+                case _:
+                    pass
 
     @override
     def __init__(self, node_config: NodeConfig, wire_config: WireConfig):
@@ -554,17 +356,6 @@ class Node:
         self.ip_mapping[self.Ip] = self.Mac
         self.ip_handlers = []
         self.applications = {}
-        self._ddos_stop: Event | None = None
-        self._mitm_mode = "passive"
-        self._mitm_active = False
-        self._slowloris_stop: Event | None = None
-        self._rddos_stop: Event | None = None
-
-        # Connection tracking (target for Slowloris)
-        self._conn_table: dict[int, dict] = {}
-        self._conn_lock = Lock()
-        self._max_connections = 10
-        self._conn_timeout = 10.0
 
         self.logger.info("connected to wire")
 
@@ -576,10 +367,6 @@ class Node:
         else:
             self.firewall = None
 
-        self._start_receiver()
-        Thread(target=lambda: self.send_ARP_request(self.Ip), daemon=True).start()
-
-    def _start_receiver(self):
         def watched():
             try:
                 self.rcv_MAC_frame()
@@ -589,6 +376,7 @@ class Node:
                 self.logger.warning("Receiver thread exited.")
 
         Thread(target=watched, daemon=True).start()
+        Thread(target=lambda: self.send_ARP_request(self.Ip), daemon=True).start()
 
     def __del__(self):
         self._socket.close()

@@ -4,7 +4,7 @@ from typing import override
 from networking.components.node import Application, FrameHandler, Node
 from networking.constants import BYTE_ENCODING_TYPE
 from networking.frames import IPFrame
-from networking.types import IPProtocol, IPaddr, MACaddr
+from networking.types import IPProtocol, IPaddr, MACaddr, PayloadType
 
 
 class MITMHandler(FrameHandler):
@@ -35,9 +35,9 @@ class MITMHandler(FrameHandler):
             original_data = ip_frame.data
 
             node.logger.warning(
-                f"[MITM] Intercepted packet: "
-                f"src=0x{ip_frame.source:02x} dst=0x{ip_frame.destination:02x} "
-                f"proto={IPProtocol(ip_frame.protocol).name} data={original_data}"
+                "[MITM] Intercepted packet: "
+                + f"src=0x{ip_frame.source:02x} dst=0x{ip_frame.destination:02x} "
+                + f"proto={IPProtocol(ip_frame.protocol).name} data={original_data}"
             )
 
             decoded = original_data.decode(BYTE_ENCODING_TYPE)
@@ -81,17 +81,16 @@ class MITMApplication(Application):
 
     def __init__(self, node: Node) -> None:
         self.victim_router_pair = None
-        node.add_handler(MITMHandler(self))
+        _ = node.add_handler(MITMHandler(self))
 
     @override
-    def handle_command(self, node: Node, *args, **kwargs):
+    def handle_command(self, node: Node, *args: str):
         match args:
-            case ["stop"]:
+            case ("stop",):
                 if not self.victim_router_pair:
                     return
                 victim_ip, router_ip = self.victim_router_pair
                 self.victim_router_pair = None
-                node.logger.warning("Removing ARP intercept handler")
 
                 victim_mac = node.resolve_IP(victim_ip)
                 router_mac = node.resolve_IP(router_ip)
@@ -99,20 +98,26 @@ class MITMApplication(Application):
                 node.send_IP_frame(
                     router_ip,
                     IPProtocol.ARP,
-                    b"res",
+                    PayloadType.RES,
                     spoofed_mac=victim_mac,
                     spoof_src=victim_ip,
                 )
                 node.send_IP_frame(
                     victim_ip,
                     IPProtocol.ARP,
-                    b"res",
+                    PayloadType.RES,
                     spoofed_mac=router_mac,
                     spoof_src=router_ip,
                 )
-            case [victim_ip, router_ip]:
+            case (victim_ip_hex, router_ip_hex):
+                victim_ip = int(victim_ip_hex, base=16)
+                router_ip = int(router_ip_hex, base=16)
+
                 self.victim_router_pair = (victim_ip, router_ip)
                 Thread(target=self.poison_loop, args=(node,), daemon=True).start()
+                node.logger.warning(f"[MITM] Attack started against 0x{victim_ip:02x}")
+            case _:
+                pass
 
     def poison_loop(self, node: Node):
         if not self.victim_router_pair:

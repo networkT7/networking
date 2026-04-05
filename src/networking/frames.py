@@ -2,7 +2,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 import random
-from typing import override
+from typing import SupportsBytes, override
 
 from networking.constants import BYTE_ENCODING_TYPE
 from networking.types import (
@@ -180,8 +180,7 @@ class IPFrame:
             raise DeserializationException("fragment bit not set for all frames")
 
         for attr in ["fragment_id", "source", "destination", "protocol"]:
-            first = getattr(frames[0], attr)
-            if any(first != getattr(f, attr) for f in frames):
+            if any(getattr(frames[0], attr) != getattr(f, attr) for f in frames):
                 raise DeserializationException(f"{attr} not same for all frames")
 
         sorted_frames = sorted(frames, key=lambda f: f.fragment_offset)
@@ -244,13 +243,14 @@ class IPFrame:
         src: int,
         dst: int,
         protocol: IPProtocol,
-        data: bytes = b"",
+        data: SupportsBytes,
         fragment_info: int = 0,
     ):
         assert valid_IP(src), "not a valid src IP"
         assert valid_IP(dst), "not a valid dst IP"
         assert protocol in IPProtocol, "not a valid protocol"
 
+        data = bytes(data)
         length = len(data)
         assert length <= 256, "data is too large for frame"
 
