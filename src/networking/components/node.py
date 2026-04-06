@@ -144,7 +144,11 @@ class Node:
             f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{ip_frame.destination:02x} with protocol {IPProtocol(ip_frame.protocol).name}"
         )
 
-        self.handle_ip_frame(ip_frame, src_mac)
+        # prevent blocking rcv_MAC_frame (impt for MITM)
+        # when MITM receives a frame, it blocks and waits for user input
+        # ARP flooding packets build up in the socket.recv buffer
+        # resulting in deserialization exception (data size doesn't match)
+        Thread(target=self.handle_ip_frame, args=(ip_frame, src_mac)).start()
 
     def handle_ip_frame(self, ip_frame: IPFrame, src_mac: MACaddr):
         frame: IPFrame | None = ip_frame
