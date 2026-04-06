@@ -123,14 +123,16 @@ class TCPApplication(Application):
         super().__init__()
 
     @override
-    def handle_command(self, node: Node, *args: str):
+    def handle_command(self, node: Node, *args: str) -> bool:
         match args:
             case ("STATS",):
                 self.stats()
-            case (dst,):
+                return False
+            case ("CONNECT", dst):
                 node.send_IP_frame(int(dst, base=16), IPProtocol.TCP, TCPState.SYN)
+                return True
             case _:
-                pass
+                return False
 
     def stats(self):
         print("\n=== TRAFFIC STATS ===")

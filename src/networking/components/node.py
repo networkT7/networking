@@ -49,7 +49,7 @@ class FrameHandler:
 
 class Application(ABC):
     @abstractmethod
-    def handle_command(self, _node: Node, *_args: str):
+    def handle_command(self, _node: Node, *_args: str) -> bool:
         pass
 
 
@@ -87,7 +87,7 @@ class Node:
     sniffing: bool
     ip_mapping: TSDict[IPaddr, MACaddr]
     ip_handlers: list[FrameHandler]
-    applications: dict[str, Application]
+    applications: list[Application]
 
     # receiving
     def rcv_MAC_frame(self) -> None:
@@ -141,7 +141,8 @@ class Node:
             return
 
         self.logger.debug(
-            f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{ip_frame.destination:02x} with protocol {IPProtocol(ip_frame.protocol).name}")
+            f"rcving {ip_frame.data} from 0x{ip_frame.source:02x} to 0x{ip_frame.destination:02x} with protocol {IPProtocol(ip_frame.protocol).name}"
+        )
 
         self.handle_ip_frame(ip_frame, src_mac)
 
@@ -156,8 +157,8 @@ class Node:
         self.ip_handlers.append(handler_class)
         return self
 
-    def add_application(self, name: str, application: Application):
-        self.applications[name] = application
+    def add_application(self, application: Application):
+        self.applications.append(application)
         return self
 
     # sending
@@ -244,9 +245,6 @@ class Node:
                         int(dst, base=16), IPProtocol.PING, PayloadType.REQ
                     )
 
-                case ["CONNECT", dst]:
-                    self.applications["tcp"].handle_command(self, dst)
-
                 case ["SPOOF", fake_src, dst, *msg]:
                     self.send_IP_frame(
                         int(dst, base=16),
@@ -258,22 +256,6 @@ class Node:
                 case ["SNIFF", mode] if mode.lower() in ["on", "off"]:
                     self.sniffing = True if mode.lower() == "on" else False
                     print(f"[*] Sniffing {'enabled' if self.sniffing else 'disabled'}")
-
-                case ["MITM", *args]:
-                    self.applications["mitm"].handle_command(self, *args)
-
-                case [ddos_attack, action] if ddos_attack in (
-                    "DDOS",
-                    "SLOWLORIS",
-                    "RDDOS",
-                ):
-                    self.applications["ddos"].handle_command(self, ddos_attack, action)
-
-                case ["STATS"]:
-                    print("\n=== TRAFFIC STATS ===")
-                    self.applications["tcp"].handle_command(self, "STATS")
-                    self.applications["ddos"].handle_command(self, "STATS")
-                    print("====================\n")
 
                 case ["ARP"]:
                     print("\n=== ARP TABLE ===")
@@ -339,8 +321,12 @@ class Node:
 
                 case ["HELP"] | ["?"]:
                     print(HELP)
-                case _:
+                case []:
                     pass
+                case args:
+                    for app in self.applications:
+                        if app.handle_command(self, *args):
+                            break
 
     @override
     def __init__(self, node_config: NodeConfig, wire_config: WireConfig):
@@ -354,7 +340,7 @@ class Node:
         self.ip_mapping = TSDict()
         self.ip_mapping[self.Ip] = self.Mac
         self.ip_handlers = []
-        self.applications = {}
+        self.applications = []
 
         self.logger.info("connected to wire")
 

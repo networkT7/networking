@@ -12,7 +12,7 @@ class Wire:
     __targets: list[socket.socket]
     __lock: Lock  # guards __targets during broadcast
 
-    def _broadcast(self, msg: bytes, sender: socket.socket):
+    def _broadcast(self, msg: bytes):
         """Send msg to every connected socket except the sender."""
         with self.__lock:
             targets = list(self.__targets)
@@ -37,7 +37,7 @@ class Wire:
                     logger.info("connection closed by peer")
                     break
                 logger.debug(f"[WIRE RECV] {len(msg)} bytes: {msg.hex()}")
-                self._broadcast(msg, sender=conn)
+                self._broadcast(msg)
         except OSError as e:
             logger.warning(f"connection error: {e}")
         finally:

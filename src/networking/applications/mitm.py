@@ -56,6 +56,8 @@ class MITMHandler(FrameHandler):
                 case "2":
                     print("\n⚠️  Press ENTER before typing modified message", flush=True)
                     new_msg = input("Enter modified message: ")
+                    while not new_msg:
+                        new_msg = input("Enter modified message: ")
                     modified = new_msg.encode("utf-8")
 
                 case "3":
@@ -85,11 +87,14 @@ class MITMApplication(Application):
         _ = node.add_handler(MITMHandler(self))
 
     @override
-    def handle_command(self, node: Node, *args: str):
-        match args:
+    def handle_command(self, node: Node, *args: str) -> bool:
+        if args[0] != "MITM":
+            return False
+
+        match args[1:]:
             case ("STOP",):
                 if not self.victim_router_pair:
-                    return
+                    return True
                 victim_ip, router_ip = self.victim_router_pair
                 self.victim_router_pair = None
 
@@ -119,6 +124,7 @@ class MITMApplication(Application):
                 node.logger.warning(f"[MITM] Attack started against 0x{victim_ip:02x}")
             case _:
                 pass
+        return True
 
     def poison_loop(self, node: Node):
         if not self.victim_router_pair:

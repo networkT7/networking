@@ -53,11 +53,13 @@ match argv:
         from networking.log_format import create_logger
         from networking.config import LOGGING_LEVEL
         router_macs = {
-            iface["MAC"]
-            for iface in config["routers"]["interfaces"].values()
+            iface["MAC"] for iface in config["routers"]["interfaces"].values()
         }
 
-        ids = IDS(create_logger(f"IDS-{node_name}", level=LOGGING_LEVEL), trusted_macs=router_macs)
+        ids = IDS(
+            create_logger(f"IDS-{node_name}", level=LOGGING_LEVEL),
+            trusted_macs=router_macs,
+        )
         ids.seed(c["IP"], c["MAC"])
 
         n = Node(c, wire)
@@ -67,9 +69,9 @@ match argv:
             .add_handler(ARPHandler())
             .add_handler(PingHandler())
             .add_handler(DataHandler())
-            .add_application("mitm", MITMApplication(n))
-            .add_application("tcp", TCPApplication(n))
-            .add_application("ddos", DDOSApplication(n))
+            .add_application(MITMApplication(n))
+            .add_application(TCPApplication(n))
+            .add_application(DDOSApplication(n))
             .input()
         )
 
