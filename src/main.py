@@ -77,8 +77,13 @@ match argv:
 
     case [_, "router"]:
         Router(config["routers"], config["wires"])
-        import signal
-        signal.pause()
+        import signal, time
+        pause = getattr(signal, "pause", None)
+        if pause:
+            pause()
+        else:
+            while True:
+                time.sleep(1)
 
     case _:
         usage()
