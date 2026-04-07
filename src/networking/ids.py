@@ -184,12 +184,6 @@ class IDS:
                 f"[IDS] 🛡 Auto-blocked 0x{src:02x} via firewall rule #{index} "
                 f"(reason: {reason})"
             )
-        else:
-            self._logger.warning(
-                f"[IDS] No firewall on node {node.Mac} — "
-                f"cannot auto-block 0x{src:02x} (reason: {reason}). "
-                f"Enable firewall in config.yaml to activate auto-blocking."
-            )
 
     def seed(self, ip: IPaddr, mac: MACaddr):
         """Pre-seed a trusted IP→MAC mapping (e.g. own address on startup)."""
