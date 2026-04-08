@@ -116,12 +116,16 @@ class Node:
 
                 case MACFrame(src, dst, _, data) if self.sniffing:
                     try:
-                        self.logger.warning("[SNIFF] ...")
-                        ip = IPFrame.from_bytes(frame.data)
-                        self.handle_ip_frame(ip, src)
+                        ip = IPFrame.from_bytes(data)
+                        self.logger.warning(
+                            f"[SNIFF] src={src} dst={dst} "
+                            f"ip_src=0x{ip.source:02x} ip_dst=0x{ip.destination:02x} "
+                            f"proto={ip.protocol.name} len={len(ip.data)} "
+                            f"data={ip.data.decode('utf-8', errors='replace')}"
+                        )
                     except DeserializationException:
                         self.logger.warning(
-                            f"[SNIFF] raw frame: src={src} dst={dst} data={data}"
+                            f"[SNIFF] raw frame: src={src} dst={dst} data={data.hex()}"
                         )
                 case _:
                     pass
