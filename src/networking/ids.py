@@ -43,6 +43,7 @@ class IDS:
             lambda _node, _frame: True,
             self._inspect,
         )
+
     # ------------------------------------------------------------------
     # Main inspection entry point
     # ------------------------------------------------------------------
@@ -121,7 +122,7 @@ class IDS:
                         f"now claiming to be at MAC '{src_mac}' — possible MITM!"
                         + (f" (x{count})" if count > 1 else "")
                     )
-                self._block(node, src_ip, reason="ARP spoof")
+                # self._block(node, src_ip, reason="ARP spoof")
 
     # ------------------------------------------------------------------
     # Detection: IP Spoofing (DATA / PING frames)
@@ -138,8 +139,8 @@ class IDS:
         trusted MAC so repeated spoofed packets keep triggering alerts.
         """
         if ip_frame.protocol == IPProtocol.ARP:
-            return 
-        if src_mac in self._trusted_macs: 
+            return
+        if src_mac in self._trusted_macs:
             return
         src_ip = ip_frame.source
 

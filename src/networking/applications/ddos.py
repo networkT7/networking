@@ -148,7 +148,7 @@ class DDOSApplication(Application):
             f"[RDDOS] Starting rotating source DDoS on 0x{target_ip:02x}"
         )
 
-        e = self.attack_events["SLOWLORIS"]
+        e = self.attack_events["RDDOS"]
         e.clear()
 
         pool = list(range(0xC0, 0xD4))  # 20 spoofed source IPs
