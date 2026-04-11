@@ -1,3 +1,4 @@
+task install
 tmux new -d -s networking
 tmux neww
 tmux send "task -- wire W1" ENTER
